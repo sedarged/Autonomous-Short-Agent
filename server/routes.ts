@@ -6,7 +6,7 @@ import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes, contentTypes } from "@shared/schema";
 import type { ContentType } from "@shared/schema";
-import { suggestTrendingTopics, processEditCommand, regenerateCaptionWithFeedback } from "./ai";
+import { suggestTrendingTopics, processEditCommand, regenerateCaptionWithFeedback, researchViralTrends, analyzeCompetitor } from "./ai";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 
@@ -604,5 +604,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Health check
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // ===================
+  // TREND RESEARCH ROUTES
+  // ===================
+
+  // Research viral trends for a niche
+  app.post("/api/trends/research", async (req: Request, res: Response) => {
+    try {
+      const { niche, platform } = req.body;
+      
+      if (!niche || typeof niche !== 'string') {
+        return res.status(400).json({ error: "Niche is required" });
+      }
+
+      const validPlatforms = ['tiktok', 'youtube_shorts', 'both'];
+      const selectedPlatform = validPlatforms.includes(platform) ? platform : 'both';
+
+      const results = await researchViralTrends(niche, selectedPlatform);
+      res.json(results);
+    } catch (error) {
+      console.error("Error researching trends:", error);
+      res.status(500).json({ error: "Failed to research trends" });
+    }
+  });
+
+  // Analyze competitor channel
+  app.post("/api/trends/competitor", async (req: Request, res: Response) => {
+    try {
+      const { channelIdentifier, platform } = req.body;
+      
+      if (!channelIdentifier || typeof channelIdentifier !== 'string') {
+        return res.status(400).json({ error: "Channel identifier is required" });
+      }
+
+      const validPlatforms = ['tiktok', 'youtube'];
+      const selectedPlatform = validPlatforms.includes(platform) ? platform : 'youtube';
+
+      const results = await analyzeCompetitor(channelIdentifier, selectedPlatform);
+      res.json(results);
+    } catch (error) {
+      console.error("Error analyzing competitor:", error);
+      res.status(500).json({ error: "Failed to analyze competitor" });
+    }
   });
 }

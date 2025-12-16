@@ -797,4 +797,237 @@ function getDummyScript(
   return { script, scenes };
 }
 
+// Research viral trends using web search + AI analysis
+export async function researchViralTrends(
+  niche: string,
+  platform: 'tiktok' | 'youtube_shorts' | 'both' = 'both'
+): Promise<{
+  trends: Array<{
+    topic: string;
+    description: string;
+    viralScore: number;
+    suggestedAngle: string;
+    hashtags: string[];
+  }>;
+  insights: string;
+}> {
+  if (DUMMY_MODE) {
+    return {
+      trends: [
+        {
+          topic: "AI Technology Breakthroughs",
+          description: "Latest AI developments are going viral",
+          viralScore: 95,
+          suggestedAngle: "Mind-blowing AI facts that will shock you",
+          hashtags: ["#ai", "#tech", "#viral", "#mindblown"]
+        },
+        {
+          topic: "Psychology Life Hacks",
+          description: "Simple psychology tricks getting millions of views",
+          viralScore: 88,
+          suggestedAngle: "Psychology tricks that actually work",
+          hashtags: ["#psychology", "#lifehacks", "#facts"]
+        },
+        {
+          topic: "History's Darkest Secrets",
+          description: "Hidden history facts trending across platforms",
+          viralScore: 85,
+          suggestedAngle: "History facts they don't teach in school",
+          hashtags: ["#history", "#facts", "#darkhistory"]
+        }
+      ],
+      insights: "Current viral patterns favor short-form educational content with shocking hooks. Top performers use curiosity gaps in first 2 seconds."
+    };
+  }
+
+  const platformSearchTerm = platform === 'both' ? 'TikTok YouTube Shorts' : 
+    platform === 'tiktok' ? 'TikTok' : 'YouTube Shorts';
+
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.chat.completions.create({
+          model: ECONOMY_MODEL,
+          messages: [
+            {
+              role: "system",
+              content: `You are a viral content researcher analyzing what's currently trending on ${platformSearchTerm}. 
+You have deep knowledge of viral content patterns, algorithm preferences, and what makes videos go viral in 2024.
+Focus on the "${niche}" niche and identify specific viral opportunities.
+Return actionable, specific topics - not generic suggestions.`
+            },
+            {
+              role: "user",
+              content: `Research and identify the TOP 5 most viral content opportunities in the "${niche}" niche for ${platformSearchTerm} right now.
+
+For each opportunity:
+1. Specific topic that's currently trending or has viral potential
+2. Why it's going viral (what makes it work)
+3. A score 0-100 of viral potential
+4. A unique angle or hook to stand out
+5. Relevant hashtags
+
+Also provide insights about current algorithm preferences and viral patterns.
+
+Return JSON:
+{
+  "trends": [
+    {
+      "topic": "specific topic title",
+      "description": "why this is trending",
+      "viralScore": 85,
+      "suggestedAngle": "unique hook or angle",
+      "hashtags": ["#tag1", "#tag2"]
+    }
+  ],
+  "insights": "overall insights about current viral patterns"
+}`
+            }
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 1024,
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 1000 }
+  );
+
+  const content = response.choices[0]?.message?.content || "{}";
+  
+  try {
+    const parsed = JSON.parse(content);
+    return {
+      trends: Array.isArray(parsed.trends) ? parsed.trends : [],
+      insights: typeof parsed.insights === 'string' ? parsed.insights : "No insights available"
+    };
+  } catch (parseError) {
+    console.error("Failed to parse trend research response:", parseError, "Content:", content);
+    return {
+      trends: [],
+      insights: "Failed to parse trend data. Please try again."
+    };
+  }
+}
+
+// Analyze competitor content for ideas
+export async function analyzeCompetitor(
+  channelIdentifier: string,
+  platform: 'tiktok' | 'youtube' = 'youtube'
+): Promise<{
+  channelName: string;
+  topPerformingTopics: Array<{
+    topic: string;
+    estimatedViews: string;
+    whyItWorks: string;
+    howToAdapt: string;
+  }>;
+  contentPatterns: string[];
+  recommendations: string[];
+}> {
+  if (DUMMY_MODE) {
+    return {
+      channelName: channelIdentifier,
+      topPerformingTopics: [
+        {
+          topic: "Scary Facts You Didn't Know",
+          estimatedViews: "2M+",
+          whyItWorks: "Curiosity gap in title + fear element",
+          howToAdapt: "Create your own scary facts series with unique topics"
+        },
+        {
+          topic: "Would You Rather Challenges",
+          estimatedViews: "1.5M+",
+          whyItWorks: "Interactive format drives comments",
+          howToAdapt: "Make niche-specific would you rather questions"
+        }
+      ],
+      contentPatterns: [
+        "Uses hook in first 1 second",
+        "Posts 2-3 times daily",
+        "Consistent visual branding"
+      ],
+      recommendations: [
+        "Adopt similar hook patterns but with your unique style",
+        "Focus on their underserved topics",
+        "Match posting frequency for algorithm favor"
+      ]
+    };
+  }
+
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.chat.completions.create({
+          model: ECONOMY_MODEL,
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert content strategist analyzing competitor channels on ${platform}.
+Analyze the channel "${channelIdentifier}" and identify what makes their content successful.
+Provide actionable insights for creating similar but differentiated content.`
+            },
+            {
+              role: "user",
+              content: `Analyze the ${platform} channel/creator "${channelIdentifier}".
+
+Identify:
+1. Their top-performing content topics and estimated views
+2. Why that content works (hooks, formats, patterns)
+3. How someone could adapt these ideas without copying
+4. Content patterns they use consistently
+5. Strategic recommendations for competing in the same space
+
+Return JSON:
+{
+  "channelName": "${channelIdentifier}",
+  "topPerformingTopics": [
+    {
+      "topic": "topic title",
+      "estimatedViews": "view count estimate",
+      "whyItWorks": "analysis of success factors",
+      "howToAdapt": "how to create similar content"
+    }
+  ],
+  "contentPatterns": ["pattern 1", "pattern 2"],
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}`
+            }
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 1024,
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 1000 }
+  );
+
+  const content = response.choices[0]?.message?.content || "{}";
+  
+  try {
+    const parsed = JSON.parse(content);
+    return {
+      channelName: typeof parsed.channelName === 'string' ? parsed.channelName : channelIdentifier,
+      topPerformingTopics: Array.isArray(parsed.topPerformingTopics) ? parsed.topPerformingTopics : [],
+      contentPatterns: Array.isArray(parsed.contentPatterns) ? parsed.contentPatterns : [],
+      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : []
+    };
+  } catch (parseError) {
+    console.error("Failed to parse competitor analysis response:", parseError, "Content:", content);
+    return {
+      channelName: channelIdentifier,
+      topPerformingTopics: [],
+      contentPatterns: [],
+      recommendations: ["Analysis failed. Please try again with a different channel name."]
+    };
+  }
+}
+
 export { openai };

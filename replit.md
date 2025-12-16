@@ -13,6 +13,8 @@ The system provides full pipeline visibility with job tracking, progress percent
 - **Viral Optimization**: Hook strength, pacing style, and CTA controls for maximizing engagement
 - **AI Topic Suggestions**: Research-based viral trend recommendations for content ideas
 - **Conversational Editing**: Natural language chat interface to modify captions and hashtags post-generation
+- **Trend Research**: AI-powered discovery of viral content opportunities with viral potential scores
+- **Competitor Analysis**: Analyze successful creators to extract content patterns and strategies
 
 ## IMPORTANT RULES
 

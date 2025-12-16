@@ -24,7 +24,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, RotateCcw, Cog } from "lucide-react";
+import { Save, RotateCcw, Cog, Zap, DollarSign, TrendingUp } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -36,6 +37,8 @@ const settingsSchema = z.object({
   defaultSubtitleStyle: z.enum(["clean", "karaoke", "bold_outline"]).default("clean"),
   autoPollingInterval: z.number().min(5).max(60).default(15),
   maxConcurrentJobs: z.number().min(1).max(5).default(2),
+  budgetMode: z.boolean().default(true),
+  isMonetized: z.boolean().default(false),
 });
 
 type SettingsFormValues = z.infer<typeof settingsSchema>;
@@ -48,6 +51,8 @@ const defaultSettings: SettingsFormValues = {
   defaultSubtitleStyle: "clean",
   autoPollingInterval: 15,
   maxConcurrentJobs: 2,
+  budgetMode: true,
+  isMonetized: false,
 };
 
 export default function Settings() {
@@ -101,6 +106,104 @@ export default function Settings() {
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
+          {/* Budget & Monetization Mode */}
+          <Card data-testid="budget-settings" className="border-2 border-primary/20">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-primary" />
+                Cost Management
+                {form.watch("budgetMode") && (
+                  <Badge variant="secondary" className="ml-2">Budget Mode Active</Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Optimize video generation costs while building your audience
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FormField
+                control={form.control}
+                name="budgetMode"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-4 bg-muted/30">
+                    <div className="space-y-0.5">
+                      <FormLabel className="flex items-center gap-2">
+                        <Zap className="w-4 h-4" />
+                        Budget Mode
+                      </FormLabel>
+                      <FormDescription>
+                        Optimized settings for lower cost (~$0.15-0.20/video instead of ~$0.40-0.50)
+                        <br />
+                        <span className="text-xs">Uses 45s max duration, 4 scenes/min - perfect for building your channel</span>
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        data-testid="switch-budget-mode"
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="isMonetized"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Channel Monetized
+                      </FormLabel>
+                      <FormDescription>
+                        Enable when you start earning from TikTok/YouTube
+                        <br />
+                        <span className="text-xs">Unlocks longer videos (60s+) and premium features</span>
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked);
+                          if (checked) {
+                            form.setValue("budgetMode", false);
+                          }
+                        }}
+                        data-testid="switch-monetized"
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {form.watch("budgetMode") && (
+                <div className="rounded-lg bg-primary/5 p-4 text-sm">
+                  <p className="font-medium mb-2">Budget Mode applies these optimizations:</p>
+                  <ul className="space-y-1 text-muted-foreground">
+                    <li>Max 45 second videos (TikTok sweet spot)</li>
+                    <li>4 scenes per minute (fewer AI images)</li>
+                    <li>Estimated cost: $0.15-0.20 per video</li>
+                  </ul>
+                </div>
+              )}
+
+              {form.watch("isMonetized") && !form.watch("budgetMode") && (
+                <div className="rounded-lg bg-green-500/10 p-4 text-sm">
+                  <p className="font-medium mb-2 text-green-700 dark:text-green-400">Full Mode Unlocked</p>
+                  <ul className="space-y-1 text-muted-foreground">
+                    <li>Videos up to 3 minutes</li>
+                    <li>Up to 8 scenes per minute</li>
+                    <li>Premium visual styles</li>
+                  </ul>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Audio Defaults */}
           <Card data-testid="audio-settings">
             <CardHeader>
