@@ -41,7 +41,9 @@ import {
   Music, 
   Subtitles,
   Save,
-  Check
+  Check,
+  Lightbulb,
+  Loader2
 } from "lucide-react";
 import { ContentTypeIcon } from "@/components/ContentTypeIcon";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -127,10 +129,28 @@ export default function NewVideo() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
+  const [topicSuggestions, setTopicSuggestions] = useState<string[]>([]);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
 
   const { data: presets } = useQuery<Preset[]>({
     queryKey: ["/api/presets"],
   });
+
+  // Fetch trending topic suggestions
+  const fetchSuggestions = async (contentType: ContentType) => {
+    setSuggestionLoading(true);
+    try {
+      const response = await fetch(`/api/suggestions/topics/${contentType}`);
+      if (response.ok) {
+        const data = await response.json();
+        setTopicSuggestions(data.topics || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch suggestions:", error);
+    } finally {
+      setSuggestionLoading(false);
+    }
+  };
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -330,7 +350,45 @@ export default function NewVideo() {
                   name="contentConfig.prompt"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Content Prompt</FormLabel>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <FormLabel>Content Prompt</FormLabel>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fetchSuggestions(contentType)}
+                          disabled={suggestionLoading}
+                          data-testid="button-suggest-topics"
+                        >
+                          {suggestionLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Lightbulb className="h-4 w-4 mr-2" />
+                          )}
+                          Suggest Topics
+                        </Button>
+                      </div>
+                      
+                      {topicSuggestions.length > 0 && (
+                        <div className="flex flex-wrap gap-2 py-2">
+                          {topicSuggestions.map((topic, idx) => (
+                            <Button
+                              key={idx}
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                field.onChange(topic);
+                                setTopicSuggestions([]);
+                              }}
+                              data-testid={`button-suggestion-${idx}`}
+                            >
+                              {topic}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                      
                       <FormControl>
                         <Textarea 
                           placeholder="Describe what you want the video to be about, or paste content directly..."

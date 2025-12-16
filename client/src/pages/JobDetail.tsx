@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -5,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   ChevronLeft, 
   RefreshCw, 
@@ -13,7 +16,12 @@ import {
   Play,
   ExternalLink,
   AlertCircle,
-  Hash
+  Hash,
+  MessageSquare,
+  Send,
+  Loader2,
+  Bot,
+  User
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ContentTypeIcon } from "@/components/ContentTypeIcon";
@@ -21,13 +29,14 @@ import { ProgressBar, ETADisplay } from "@/components/ProgressBar";
 import { PipelineVisualization } from "@/components/PipelineVisualization";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { JobWithSteps, ContentType, JobStatus, JobSettings } from "@shared/schema";
+import type { JobWithSteps, ContentType, JobStatus, JobSettings, JobEdit } from "@shared/schema";
 import { contentTypeInfo } from "@shared/schema";
 import { formatDistanceToNow, format } from "date-fns";
 
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
+  const [editMessage, setEditMessage] = useState("");
 
   const { data: job, isLoading, refetch, isFetching } = useQuery<JobWithSteps>({
     queryKey: ["/api/jobs", id],
@@ -60,6 +69,40 @@ export default function JobDetail() {
       });
     }
   });
+
+  // Query for edit history
+  const { data: editHistory, refetch: refetchEdits } = useQuery<JobEdit[]>({
+    queryKey: ["/api/jobs", id, "edits"],
+    enabled: !!job && job.status === 'completed'
+  });
+
+  // Mutation for sending edit messages
+  const sendEditMutation = useMutation({
+    mutationFn: async (message: string) => {
+      return apiRequest("POST", `/api/jobs/${id}/edits`, { message });
+    },
+    onSuccess: () => {
+      setEditMessage("");
+      refetchEdits();
+      toast({
+        title: "Message sent",
+        description: "The assistant is processing your request."
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to send message",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const handleSendEdit = () => {
+    if (editMessage.trim()) {
+      sendEditMutation.mutate(editMessage.trim());
+    }
+  };
 
   const copyCaption = () => {
     if (job?.caption) {
@@ -298,6 +341,69 @@ export default function JobDetail() {
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Conversational Editing Chat */}
+          {isCompleted && (
+            <Card data-testid="edit-chat-section">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Edit with Chat
+                </CardTitle>
+                <CardDescription>
+                  Ask me to modify captions, suggest improvements, or refine your video
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Chat history */}
+                {editHistory && editHistory.length > 0 && (
+                  <ScrollArea className="h-48 border rounded-md p-3">
+                    <div className="space-y-3">
+                      {editHistory.map((edit) => (
+                        <div 
+                          key={edit.id} 
+                          className={`flex gap-2 ${edit.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`flex items-start gap-2 max-w-[85%] ${edit.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${edit.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                              {edit.role === 'user' ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
+                            </div>
+                            <div className={`rounded-lg px-3 py-2 text-sm ${edit.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                              {edit.message}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+                
+                {/* Message input */}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="e.g., Make the caption more engaging..."
+                    value={editMessage}
+                    onChange={(e) => setEditMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendEdit()}
+                    disabled={sendEditMutation.isPending}
+                    data-testid="input-edit-message"
+                  />
+                  <Button 
+                    size="icon" 
+                    onClick={handleSendEdit}
+                    disabled={!editMessage.trim() || sendEditMutation.isPending}
+                    data-testid="button-send-edit"
+                  >
+                    {sendEditMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

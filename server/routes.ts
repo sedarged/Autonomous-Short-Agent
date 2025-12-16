@@ -4,7 +4,9 @@ import { storage } from "./storage";
 import { enqueueJob, initializeJobSteps } from "./videoWorker";
 import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes } from "@shared/schema";
+import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes, contentTypes } from "@shared/schema";
+import type { ContentType } from "@shared/schema";
+import { suggestTrendingTopics, processEditCommand } from "./ai";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 
@@ -237,6 +239,104 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error deleting preset:", error);
       res.status(500).json({ error: "Failed to delete preset" });
+    }
+  });
+
+  // ===================
+  // AI SUGGESTIONS ROUTES
+  // ===================
+
+  // Get trending topic suggestions for a content type
+  app.get("/api/suggestions/topics/:contentType", async (req: Request, res: Response) => {
+    try {
+      const contentType = req.params.contentType as ContentType;
+      
+      // Validate content type
+      if (!contentTypes.includes(contentType as any)) {
+        return res.status(400).json({ error: "Invalid content type" });
+      }
+
+      const suggestions = await suggestTrendingTopics(contentType);
+      res.json(suggestions);
+    } catch (error) {
+      console.error("Error getting topic suggestions:", error);
+      res.status(500).json({ error: "Failed to get topic suggestions" });
+    }
+  });
+
+  // ===================
+  // JOB EDITS ROUTES (Conversational Editing)
+  // ===================
+
+  // Get edit history for a job
+  app.get("/api/jobs/:id/edits", async (req: Request, res: Response) => {
+    try {
+      const jobId = req.params.id;
+      const job = await storage.getJob(jobId);
+      
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      const edits = await storage.getJobEdits(jobId);
+      res.json(edits);
+    } catch (error) {
+      console.error("Error fetching job edits:", error);
+      res.status(500).json({ error: "Failed to fetch job edits" });
+    }
+  });
+
+  // Create a new edit message (conversational editing)
+  app.post("/api/jobs/:id/edits", async (req: Request, res: Response) => {
+    try {
+      const jobId = req.params.id;
+      const { message } = req.body;
+
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      const job = await storage.getJob(jobId);
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (job.status !== 'completed') {
+        return res.status(400).json({ error: "Can only edit completed videos" });
+      }
+
+      // Save user message
+      const userEdit = await storage.createJobEdit({
+        jobId,
+        role: 'user',
+        message
+      });
+
+      // Process with AI
+      const aiResult = await processEditCommand(message, {
+        scriptText: job.scriptText || undefined,
+        caption: job.caption || undefined,
+        hashtags: job.hashtags || undefined,
+        contentType: job.contentType
+      });
+
+      // Save AI response
+      const assistantEdit = await storage.createJobEdit({
+        jobId,
+        role: 'assistant',
+        message: aiResult.response,
+        editCommand: aiResult.commands.length > 0 ? aiResult.commands : null,
+        affectedStages: aiResult.commands.map(c => c.targetStage).filter(Boolean) as string[]
+      });
+
+      res.status(201).json({
+        userMessage: userEdit,
+        assistantResponse: assistantEdit,
+        commands: aiResult.commands
+      });
+    } catch (error) {
+      console.error("Error processing edit:", error);
+      res.status(500).json({ error: "Failed to process edit" });
     }
   });
 

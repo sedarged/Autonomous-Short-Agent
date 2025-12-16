@@ -4,6 +4,7 @@ import {
   assets, 
   presets, 
   settings,
+  jobEdits,
   type Job, 
   type InsertJob,
   type JobStep,
@@ -14,6 +15,8 @@ import {
   type InsertPreset,
   type Setting,
   type InsertSetting,
+  type JobEdit,
+  type InsertJobEdit,
   type JobWithSteps,
   type JobStatus,
   type StepStatus
@@ -57,6 +60,10 @@ export interface IStorage {
   getSetting(key: string): Promise<Setting | undefined>;
   getAllSettings(): Promise<Record<string, unknown>>;
   setSetting(key: string, value: unknown): Promise<Setting>;
+  
+  // Job Edits
+  getJobEdits(jobId: string): Promise<JobEdit[]>;
+  createJobEdit(edit: InsertJobEdit): Promise<JobEdit>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -286,6 +293,20 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db.insert(settings).values({ key, value }).returning();
       return created;
     }
+  }
+
+  // Job Edits
+  async getJobEdits(jobId: string): Promise<JobEdit[]> {
+    return db
+      .select()
+      .from(jobEdits)
+      .where(eq(jobEdits.jobId, jobId))
+      .orderBy(jobEdits.createdAt);
+  }
+
+  async createJobEdit(edit: InsertJobEdit): Promise<JobEdit> {
+    const [created] = await db.insert(jobEdits).values(edit).returning();
+    return created;
   }
 }
 

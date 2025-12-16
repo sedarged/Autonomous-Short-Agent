@@ -282,6 +282,157 @@ export async function generateCaptionAndHashtags(
   };
 }
 
+// Generate trending topic suggestions for a content type
+export async function suggestTrendingTopics(
+  contentType: ContentType
+): Promise<{ topics: string[]; inspiration: string }> {
+  // Dummy mode: return mock suggestions
+  if (DUMMY_MODE) {
+    const mockTopics: Record<string, string[]> = {
+      reddit_story: ["Workplace revenge story", "Entitled neighbor encounter", "Wedding disaster story"],
+      aita_story: ["Family inheritance drama", "Friend wedding seating controversy", "Roommate boundary dispute"],
+      facts: ["Mind-blowing space facts", "Psychology tricks you didn't know", "Historical facts that seem fake"],
+      would_you_rather: ["Impossible food choices", "Superpower dilemmas", "Time travel paradoxes"],
+      quiz_trivia: ["Pop culture 2024 quiz", "Geography brain teasers", "Science myths debunked"],
+      motivation: ["Morning routine success", "Overcoming imposter syndrome", "Financial freedom mindset"]
+    };
+    
+    return {
+      topics: mockTopics[contentType] || ["Trending topic 1", "Trending topic 2", "Trending topic 3"],
+      inspiration: "These topics are currently performing well on social media based on engagement patterns."
+    };
+  }
+
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.chat.completions.create({
+          model: ECONOMY_MODEL,
+          messages: [
+            { 
+              role: "system", 
+              content: `You are a viral content strategist who tracks trending topics on TikTok, YouTube Shorts, and Instagram Reels.
+                       Suggest 5 highly engaging topic ideas that would perform well right now.
+                       Focus on topics with high share potential and strong emotional resonance.`
+            },
+            { 
+              role: "user", 
+              content: `Suggest 5 trending topic ideas for ${contentTypeInfo[contentType].label} content.
+                       These should be topics that are currently performing well or have viral potential.
+                       Return JSON: { "topics": ["topic1", "topic2", ...], "inspiration": "brief explanation of why these are trending" }`
+            }
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 512,
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 1000 }
+  );
+
+  const content = response.choices[0]?.message?.content || "{}";
+  const parsed = JSON.parse(content);
+  return {
+    topics: parsed.topics || [],
+    inspiration: parsed.inspiration || "Suggested based on current social media trends."
+  };
+}
+
+// Edit command types for conversational editing
+export interface EditCommand {
+  action: 'regenerate_caption' | 'update_caption' | 'regenerate_script' | 'adjust_pacing' | 'change_hook' | 'other';
+  targetStage: 'script' | 'caption' | 'full' | null;
+  parameters: Record<string, any>;
+  explanation: string;
+}
+
+// Process natural language edit requests
+export async function processEditCommand(
+  message: string,
+  jobContext: {
+    scriptText?: string;
+    caption?: string;
+    hashtags?: string[];
+    contentType: string;
+  }
+): Promise<{ response: string; commands: EditCommand[] }> {
+  // Dummy mode: return simple responses
+  if (DUMMY_MODE) {
+    if (message.toLowerCase().includes('caption')) {
+      return {
+        response: "I'll regenerate the caption with your suggestions in mind. The new caption has been updated.",
+        commands: [{ action: 'regenerate_caption', targetStage: 'caption', parameters: { prompt: message }, explanation: 'Regenerate caption' }]
+      };
+    }
+    if (message.toLowerCase().includes('hook') || message.toLowerCase().includes('opening')) {
+      return {
+        response: "I'll strengthen the hook in your script to make it more attention-grabbing.",
+        commands: [{ action: 'change_hook', targetStage: 'script', parameters: { strength: 'strong' }, explanation: 'Adjust hook strength' }]
+      };
+    }
+    return {
+      response: "I understand your feedback. For major script changes, you may want to regenerate the video with updated settings.",
+      commands: []
+    };
+  }
+
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.chat.completions.create({
+          model: ECONOMY_MODEL,
+          messages: [
+            { 
+              role: "system", 
+              content: `You are a video editing assistant that helps users refine their short-form video content.
+                       You can help with: caption updates, hashtag changes, script suggestions, hook improvements.
+                       
+                       For caption/hashtag updates, you can make changes directly.
+                       For script changes, explain what would need to change but note it requires regeneration.
+                       
+                       Be helpful, concise, and constructive in your responses.
+                       Return JSON: { "response": "your helpful response", "commands": [{ "action": "...", "targetStage": "...", "parameters": {...}, "explanation": "..." }] }
+                       
+                       Actions: regenerate_caption, update_caption, regenerate_script, adjust_pacing, change_hook, other
+                       Target stages: script, caption, full, null`
+            },
+            { 
+              role: "user", 
+              content: `The user wants to edit their ${jobContext.contentType} video.
+                       
+Current caption: ${jobContext.caption || "(none)"}
+Current hashtags: ${jobContext.hashtags?.join(', ') || "(none)"}
+Script excerpt: ${(jobContext.scriptText || "").slice(0, 500)}
+
+User request: "${message}"
+
+Provide a helpful response and any applicable edit commands.`
+            }
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 512,
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 1000 }
+  );
+
+  const content = response.choices[0]?.message?.content || "{}";
+  const parsed = JSON.parse(content);
+  return {
+    response: parsed.response || "I'll help you with that request.",
+    commands: parsed.commands || []
+  };
+}
+
 // Build system prompt based on content type and viral optimization settings
 function buildSystemPrompt(
   contentType: ContentType,

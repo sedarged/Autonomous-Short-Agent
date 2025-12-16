@@ -233,10 +233,23 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow()
 });
 
+// Job Edits table (for conversational editing history)
+export const jobEdits = pgTable("job_edits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").notNull().references(() => jobs.id, { onDelete: 'cascade' }),
+  role: text("role").notNull(), // 'user' or 'assistant'
+  message: text("message").notNull(),
+  editCommand: jsonb("edit_command"), // Parsed edit command if applicable
+  affectedStages: text("affected_stages").array(), // Which pipeline stages were affected
+  status: text("status").default('completed'), // 'pending', 'processing', 'completed', 'failed'
+  createdAt: timestamp("created_at").notNull().defaultNow()
+});
+
 // Relations
 export const jobsRelations = relations(jobs, ({ many }) => ({
   steps: many(jobSteps),
-  assets: many(assets)
+  assets: many(assets),
+  edits: many(jobEdits)
 }));
 
 export const jobStepsRelations = relations(jobSteps, ({ one }) => ({
@@ -249,6 +262,13 @@ export const jobStepsRelations = relations(jobSteps, ({ one }) => ({
 export const assetsRelations = relations(assets, ({ one }) => ({
   job: one(jobs, {
     fields: [assets.jobId],
+    references: [jobs.id]
+  })
+}));
+
+export const jobEditsRelations = relations(jobEdits, ({ one }) => ({
+  job: one(jobs, {
+    fields: [jobEdits.jobId],
     references: [jobs.id]
   })
 }));
@@ -288,6 +308,11 @@ export const insertSettingSchema = createInsertSchema(settings).omit({
   updatedAt: true
 });
 
+export const insertJobEditSchema = createInsertSchema(jobEdits).omit({
+  id: true,
+  createdAt: true
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -306,6 +331,9 @@ export type Preset = typeof presets.$inferSelect;
 
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 export type Setting = typeof settings.$inferSelect;
+
+export type InsertJobEdit = z.infer<typeof insertJobEditSchema>;
+export type JobEdit = typeof jobEdits.$inferSelect;
 
 // Job with relations type
 export type JobWithSteps = Job & {
