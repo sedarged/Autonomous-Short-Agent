@@ -10,7 +10,8 @@ import {
   TrendingUp,
   Zap,
   BarChart3,
-  Calendar
+  Calendar,
+  DollarSign
 } from "lucide-react";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 
@@ -26,6 +27,8 @@ interface AnalyticsData {
   statusBreakdown: Record<string, number>;
   last7Days: { date: string; count: number }[];
   totalVideoDurationMinutes: number;
+  totalEstimatedCost: number;
+  avgCostPerVideo: number;
 }
 
 const contentTypeLabels: Record<string, string> = {
@@ -151,10 +154,10 @@ export default function Analytics() {
           icon={Clock}
         />
         <StatCard
-          title="Total Duration"
-          value={`${analytics.totalVideoDurationMinutes.toFixed(0)}m`}
-          description="Total video content created"
-          icon={TrendingUp}
+          title="Estimated Cost"
+          value={`$${analytics.totalEstimatedCost.toFixed(2)}`}
+          description={`~$${analytics.avgCostPerVideo.toFixed(3)} per video`}
+          icon={DollarSign}
         />
       </div>
 

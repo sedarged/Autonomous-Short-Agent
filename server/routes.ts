@@ -282,12 +282,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const totalVideoDurationMinutes = durationsWithValue.reduce((a, b) => a + b, 0) / 60;
       
       const processingTimesMinutes = completedJobs
-        .filter(j => j.createdAt && j.updatedAt)
         .map(j => {
+          if (!j.createdAt) return null;
           const created = new Date(j.createdAt);
-          const updated = new Date(j.updatedAt);
-          if (isNaN(created.getTime()) || isNaN(updated.getTime())) return null;
-          return (updated.getTime() - created.getTime()) / (1000 * 60);
+          if (isNaN(created.getTime())) return null;
+          
+          const finishedSteps = j.steps
+            ?.filter(s => s.finishedAt)
+            .map(s => new Date(s.finishedAt!).getTime())
+            .filter(t => !isNaN(t)) || [];
+          
+          if (finishedSteps.length > 0) {
+            const lastFinished = Math.max(...finishedSteps);
+            return (lastFinished - created.getTime()) / (1000 * 60);
+          }
+          
+          if (j.updatedAt) {
+            const updated = new Date(j.updatedAt);
+            if (!isNaN(updated.getTime())) {
+              return (updated.getTime() - created.getTime()) / (1000 * 60);
+            }
+          }
+          return null;
         })
         .filter((t): t is number => t !== null && t > 0);
       
@@ -322,6 +338,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         last7Days.push({ date: dateStr, count });
       }
       
+      const estimateCost = (job: typeof allJobs[0]): number => {
+        if (!['completed', 'failed'].includes(job.status)) return 0;
+        
+        let cost = 0;
+        
+        const hasCompletedScript = job.steps?.some(s => s.stepType === 'script' && s.status === 'completed');
+        if (hasCompletedScript && job.scriptText) {
+          cost += 0.005;
+        }
+        
+        const scenes = Array.isArray(job.scenes) ? job.scenes : [];
+        const scenesWithAudio = scenes.filter((s: any) => s.audioAssetUrl).length;
+        const scriptCharCount = job.scriptText?.length || 0;
+        cost += (scriptCharCount / 1000) * 0.015;
+        
+        const scenesWithImages = scenes.filter((s: any) => s.backgroundAssetUrl).length;
+        cost += scenesWithImages * 0.02;
+        
+        return cost;
+      };
+      
+      const jobsWithCosts = allJobs.filter(j => ['completed', 'failed'].includes(j.status));
+      const totalEstimatedCost = jobsWithCosts.reduce((sum, job) => sum + estimateCost(job), 0);
+      const avgCostPerVideo = jobsWithCosts.length > 0 ? totalEstimatedCost / jobsWithCosts.length : 0;
+      
       res.json({
         totalJobs: allJobs.length,
         completedJobs: completedJobs.length,
@@ -329,6 +370,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         processingJobs: processingJobs.length,
         successRate,
         avgDurationSeconds,
+        totalEstimatedCost,
+        avgCostPerVideo,
         avgProcessingTimeMinutes,
         contentTypeBreakdown,
         statusBreakdown,
