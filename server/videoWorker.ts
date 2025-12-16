@@ -140,7 +140,15 @@ export async function processJob(jobId: string): Promise<void> {
     
     console.log(`[Worker] [Step 1/5] Generating script...`);
     await runStep(jobId, 'script', async () => {
-      const result = await generateScript(settings.contentType as ContentType, settings.contentConfig || {});
+      const result = await generateScript(
+        settings.contentType as ContentType, 
+        settings.contentConfig || {},
+        {
+          targetDurationSeconds: settings.targetDurationSeconds,
+          targetPlatform: settings.targetPlatform,
+          viralOptimization: settings.viralOptimization
+        }
+      );
       context.script = result.script;
       context.scenes = result.scenes;
       

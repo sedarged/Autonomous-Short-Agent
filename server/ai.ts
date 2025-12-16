@@ -41,21 +41,35 @@ function isRateLimitError(error: any): boolean {
 // Rate limiter for concurrent API calls
 const limit = pLimit(2);
 
-// Generate script based on content type and configuration
+// Generate script based on content type, configuration, and full job settings
 export async function generateScript(
   contentType: ContentType,
-  config: Record<string, any>
+  config: Record<string, any>,
+  settings?: {
+    targetDurationSeconds?: number;
+    targetPlatform?: string;
+    viralOptimization?: {
+      hookStrength?: string;
+      pacingStyle?: string;
+      ctaEnabled?: boolean;
+    };
+  }
 ): Promise<{ script: string; scenes: Scene[] }> {
+  const targetDuration = settings?.targetDurationSeconds || 90;
+  const hookStrength = settings?.viralOptimization?.hookStrength || 'strong';
+  const pacingStyle = settings?.viralOptimization?.pacingStyle || 'fast';
+  const ctaEnabled = settings?.viralOptimization?.ctaEnabled !== false;
+  
   // Dummy mode: return deterministic content
   if (DUMMY_MODE) {
-    return getDummyScript(contentType, config);
+    return getDummyScript(contentType, config, targetDuration);
   }
 
   const info = contentTypeInfo[contentType];
   const prompt = config.prompt || "";
   
-  const systemPrompt = buildSystemPrompt(contentType);
-  const userPrompt = buildUserPrompt(contentType, config);
+  const systemPrompt = buildSystemPrompt(contentType, { hookStrength, pacingStyle, ctaEnabled });
+  const userPrompt = buildUserPrompt(contentType, config, targetDuration);
 
   const response = await pRetry(
     async () => {
@@ -267,19 +281,55 @@ export async function generateCaptionAndHashtags(
   };
 }
 
-// Build system prompt based on content type
-function buildSystemPrompt(contentType: ContentType): string {
-  const basePrompt = `You are a professional short-form video scriptwriter. 
-    Create engaging content optimized for TikTok and YouTube Shorts (30-90 seconds).
+// Build system prompt based on content type and viral optimization settings
+function buildSystemPrompt(
+  contentType: ContentType,
+  viralSettings?: {
+    hookStrength?: string;
+    pacingStyle?: string;
+    ctaEnabled?: boolean;
+  }
+): string {
+  const hookStrength = viralSettings?.hookStrength || 'strong';
+  const pacingStyle = viralSettings?.pacingStyle || 'fast';
+  const ctaEnabled = viralSettings?.ctaEnabled !== false;
+  
+  // Hook guidance based on strength setting
+  const hookMap: Record<string, string> = {
+    subtle: "Start with a gentle, intriguing opener that draws viewers in naturally",
+    medium: "Start with an engaging hook that captures attention within the first 2 seconds",
+    strong: "Start with an EXPLOSIVE hook in the first 1-2 seconds - use pattern interrupts, shocking statements, or immediate value promises"
+  };
+  const hookGuidance = hookMap[hookStrength] || hookMap.strong;
+  
+  // Pacing guidance
+  const pacingMap: Record<string, string> = {
+    slow: "Use a relaxed, meditative pace with longer pauses. Each segment can be 8-12 seconds.",
+    medium: "Use a natural, conversational pace. Each segment should be 5-8 seconds.",
+    fast: "Use rapid-fire delivery with quick cuts. Each segment should be 2-5 seconds maximum. Keep momentum HIGH."
+  };
+  const pacingGuidance = pacingMap[pacingStyle] || pacingMap.fast;
+  
+  const ctaGuidance = ctaEnabled 
+    ? "End with a strong call-to-action (like, follow, comment, share)"
+    : "End naturally without a direct call-to-action";
+
+  const basePrompt = `You are an elite viral content scriptwriter who has studied the psychology of what makes TikTok and YouTube Shorts go viral.
+    
+    Your content MUST be optimized for maximum engagement and watch time.
     Always structure your response as JSON with the following fields:
     - script: The full narration text
-    - segments: Array of text segments for scenes (each 3-8 seconds of speaking)
+    - segments: Array of text segments for scenes
     
-    Rules:
-    - Start with a strong hook (first 2 lines must grab attention)
-    - Use conversational, natural language
-    - Include a call-to-action at the end
-    - Punctuate for natural speech pacing`;
+    VIRAL OPTIMIZATION RULES:
+    - ${hookGuidance}
+    - ${pacingGuidance}
+    - ${ctaGuidance}
+    - Use conversational, relatable language that feels authentic
+    - Create curiosity gaps that keep viewers watching
+    - Use open loops (hint at something coming without revealing it)
+    - End segments on mini-cliffhangers to prevent scroll-away
+    - Punctuate for natural, energetic speech pacing`;
 
   const typeSpecificPrompts: Partial<Record<ContentType, string>> = {
     reddit_story: `${basePrompt}
@@ -367,33 +417,41 @@ function buildSystemPrompt(contentType: ContentType): string {
   return typeSpecificPrompts[contentType] || basePrompt;
 }
 
-// Build user prompt based on content type and config
-function buildUserPrompt(contentType: ContentType, config: Record<string, any>): string {
+// Build user prompt based on content type, config, and target duration
+function buildUserPrompt(contentType: ContentType, config: Record<string, any>, targetDurationSeconds?: number): string {
   const prompt = config.prompt || "";
   const count = config.count || 5;
   const topic = config.topic || prompt;
+  const duration = targetDurationSeconds || 90;
+  
+  // Duration guidance for the AI
+  const durationGuide = duration >= 120 
+    ? `Create content for a ${Math.floor(duration / 60)}-${Math.ceil(duration / 60)} minute video. Include more detail and development.`
+    : duration >= 60 
+    ? `Create content for a ${duration} second video. Standard TikTok length with good pacing.`
+    : `Create content for a ${duration} second SHORT video. Be concise and punchy.`;
   
   const typeSpecificPrompts: Partial<Record<ContentType, string>> = {
-    reddit_story: `Create a Reddit-style story about: "${prompt || 'an interesting personal experience'}"`,
-    aita_story: `Create an AITA (Am I The A**hole) story about: "${prompt || 'a moral dilemma situation'}"`,
-    two_sentence_horror: `Create a two-sentence horror story about: "${prompt || 'something terrifying'}"`,
-    short_story_generic: `Create a short fictional story about: "${prompt || 'an unexpected adventure'}"`,
-    would_you_rather: `Create ${count} Would You Rather questions about: "${topic || 'interesting dilemmas'}"`,
-    this_or_that: `Create ${count} This or That choices about: "${topic || 'popular comparisons'}"`,
-    quiz_trivia: `Create ${count} trivia questions about: "${topic || 'interesting facts'}"`,
-    riddles: `Create ${count} clever riddles about: "${topic || 'everyday objects and concepts'}"`,
-    guessing_game: `Create a guessing game with ${count} clues about: "${topic || 'a famous person or thing'}"`,
-    facts: `Create ${count} fascinating facts about: "${topic || 'interesting topics'}"`,
-    top_list: `Create a Top ${count} list about: "${topic || 'interesting things'}"`,
-    motivation: `Create a motivational piece about: "${prompt || 'success and perseverance'}"`,
-    affirmations: `Create ${count} positive affirmations about: "${topic || 'self-love and confidence'}"`,
-    language_mini_lesson: `Create a mini language lesson teaching ${count} words/phrases in "${topic || 'Spanish'}"`,
-    mini_history: `Create a mini history lesson about: "${topic || 'an interesting historical event'}"`,
-    science_mini_fact: `Create ${count} mind-blowing science facts about: "${topic || 'the universe'}"`,
+    reddit_story: `${durationGuide}\n\nCreate a Reddit-style story about: "${prompt || 'an interesting personal experience'}"`,
+    aita_story: `${durationGuide}\n\nCreate an AITA (Am I The A**hole) story about: "${prompt || 'a moral dilemma situation'}"`,
+    two_sentence_horror: `${durationGuide}\n\nCreate a two-sentence horror story about: "${prompt || 'something terrifying'}"`,
+    short_story_generic: `${durationGuide}\n\nCreate a short fictional story about: "${prompt || 'an unexpected adventure'}"`,
+    would_you_rather: `${durationGuide}\n\nCreate ${count} Would You Rather questions about: "${topic || 'interesting dilemmas'}"`,
+    this_or_that: `${durationGuide}\n\nCreate ${count} This or That choices about: "${topic || 'popular comparisons'}"`,
+    quiz_trivia: `${durationGuide}\n\nCreate ${count} trivia questions about: "${topic || 'interesting facts'}"`,
+    riddles: `${durationGuide}\n\nCreate ${count} clever riddles about: "${topic || 'everyday objects and concepts'}"`,
+    guessing_game: `${durationGuide}\n\nCreate a guessing game with ${count} clues about: "${topic || 'a famous person or thing'}"`,
+    facts: `${durationGuide}\n\nCreate ${count} fascinating facts about: "${topic || 'interesting topics'}"`,
+    top_list: `${durationGuide}\n\nCreate a Top ${count} list about: "${topic || 'interesting things'}"`,
+    motivation: `${durationGuide}\n\nCreate a motivational piece about: "${prompt || 'success and perseverance'}"`,
+    affirmations: `${durationGuide}\n\nCreate ${count} positive affirmations about: "${topic || 'self-love and confidence'}"`,
+    language_mini_lesson: `${durationGuide}\n\nCreate a mini language lesson teaching ${count} words/phrases in "${topic || 'Spanish'}"`,
+    mini_history: `${durationGuide}\n\nCreate a mini history lesson about: "${topic || 'an interesting historical event'}"`,
+    science_mini_fact: `${durationGuide}\n\nCreate ${count} mind-blowing science facts about: "${topic || 'the universe'}"`,
   };
 
   return typeSpecificPrompts[contentType] || 
-    `Create engaging content for ${contentTypeInfo[contentType].label}: "${prompt}"`;
+    `${durationGuide}\n\nCreate engaging content for ${contentTypeInfo[contentType].label}: "${prompt}"`;
 }
 
 // Build scenes from parsed script
@@ -442,40 +500,56 @@ function buildScenes(parsed: any, contentType: ContentType): Scene[] {
 }
 
 // Dummy script generator for testing
-function getDummyScript(contentType: ContentType, config: Record<string, any>): { script: string; scenes: Scene[] } {
+function getDummyScript(
+  contentType: ContentType, 
+  config: Record<string, any>,
+  targetDurationSeconds?: number
+): { script: string; scenes: Scene[] } {
   const count = config.count || 5;
+  const duration = targetDurationSeconds || 90;
   const segments: string[] = [];
+  
+  // Calculate number of scenes based on target duration (roughly 5-8 seconds per scene)
+  const avgSceneDuration = 6;
+  const targetScenes = Math.max(3, Math.ceil(duration / avgSceneDuration));
   
   switch (contentType) {
     case 'facts':
-      for (let i = 1; i <= count; i++) {
+      for (let i = 1; i <= Math.min(count, targetScenes); i++) {
         segments.push(`Fact ${i}: This is an interesting test fact about the world.`);
       }
       break;
     case 'would_you_rather':
-      for (let i = 1; i <= count; i++) {
+      for (let i = 1; i <= Math.min(count, targetScenes); i++) {
         segments.push(`Would you rather have option A or option B? Question ${i}.`);
       }
       break;
     case 'short_story_generic':
     case 'reddit_story':
-      segments.push("This is the beginning of a test story.");
-      segments.push("Something interesting happens in the middle.");
-      segments.push("The story reaches its climax here.");
-      segments.push("And this is how it all ends.");
+      const storyParts = [
+        "This is the beginning of a test story.",
+        "Something interesting happens in the middle.",
+        "The story reaches its climax here.",
+        "And this is how it all ends."
+      ];
+      // Add more segments for longer videos
+      for (let i = 0; i < Math.min(targetScenes, storyParts.length + Math.floor(targetScenes / 4)); i++) {
+        segments.push(storyParts[i % storyParts.length]);
+      }
       break;
     default:
-      for (let i = 1; i <= Math.min(count, 5); i++) {
+      for (let i = 1; i <= Math.min(count, targetScenes); i++) {
         segments.push(`Test segment ${i} for ${contentTypeInfo[contentType].label} content.`);
       }
   }
   
   const script = segments.join(' ');
+  const sceneDuration = duration / segments.length;
   const scenes: Scene[] = segments.map((text, i) => ({
     id: `scene-${i + 1}`,
     index: i,
-    startTime: i * 5,
-    endTime: (i + 1) * 5,
+    startTime: i * sceneDuration,
+    endTime: (i + 1) * sceneDuration,
     textOverlay: text.slice(0, 100),
     voiceSegmentText: text
   }));

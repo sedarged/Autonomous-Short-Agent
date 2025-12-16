@@ -46,19 +46,26 @@ import {
 import { ContentTypeIcon } from "@/components/ContentTypeIcon";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { ContentType, Preset, JobSettings } from "@shared/schema";
+import type { ContentType, Preset, JobSettings, TargetPlatform, CaptionStyle } from "@shared/schema";
 import { 
   contentTypes, 
   contentTypeInfo, 
   jobSettingsSchema,
   visualSettingsSchema,
   audioSettingsSchema,
-  subtitleSettingsSchema
+  subtitleSettingsSchema,
+  targetPlatforms,
+  platformInfo,
+  captionStyles,
+  captionStyleInfo,
+  durationPresets
 } from "@shared/schema";
 
 const formSchema = z.object({
   title: z.string().min(1, "Title is required").max(100),
   contentType: z.enum(contentTypes),
+  targetDurationSeconds: z.number().int().min(15).max(300).default(90),
+  targetPlatform: z.enum(targetPlatforms).default('both'),
   contentConfig: z.object({
     prompt: z.string().default(""),
     mode: z.enum(["ai_generated", "url", "raw_text"]).default("ai_generated"),
@@ -71,6 +78,11 @@ const formSchema = z.object({
   visual: visualSettingsSchema,
   audio: audioSettingsSchema,
   subtitles: subtitleSettingsSchema,
+  viralOptimization: z.object({
+    hookStrength: z.enum(['subtle', 'medium', 'strong']).default('strong'),
+    pacingStyle: z.enum(['slow', 'medium', 'fast']).default('fast'),
+    ctaEnabled: z.boolean().default(true)
+  }).default({})
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -78,6 +90,8 @@ type FormValues = z.infer<typeof formSchema>;
 const defaultValues: FormValues = {
   title: "",
   contentType: "reddit_story",
+  targetDurationSeconds: 90,
+  targetPlatform: "both",
   contentConfig: {
     prompt: "",
     mode: "ai_generated",
@@ -97,8 +111,15 @@ const defaultValues: FormValues = {
   },
   subtitles: {
     enabled: true,
-    style: "clean",
+    style: "minimal",
     position: "bottom",
+    fontSize: "medium",
+    animation: "pop",
+  },
+  viralOptimization: {
+    hookStrength: "strong",
+    pacingStyle: "fast",
+    ctaEnabled: true,
   },
 };
 
@@ -125,10 +146,13 @@ export default function NewVideo() {
         title: data.title,
         settings: {
           contentType: data.contentType,
+          targetDurationSeconds: data.targetDurationSeconds,
+          targetPlatform: data.targetPlatform,
           contentConfig: data.contentConfig,
           visual: data.visual,
           audio: data.audio,
           subtitles: data.subtitles,
+          viralOptimization: data.viralOptimization,
         }
       });
     },
@@ -375,6 +399,151 @@ export default function NewVideo() {
                     )}
                   />
                 )}
+
+                {/* Duration & Platform Settings */}
+                <div className="border-t pt-6 space-y-4">
+                  <h3 className="font-medium text-sm text-muted-foreground">Video Settings</h3>
+                  
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="targetDurationSeconds"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Video Duration</FormLabel>
+                          <Select 
+                            value={field.value?.toString()} 
+                            onValueChange={(v) => field.onChange(parseInt(v))}
+                          >
+                            <FormControl>
+                              <SelectTrigger data-testid="select-duration">
+                                <SelectValue placeholder="Select duration" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {durationPresets.map(preset => (
+                                <SelectItem key={preset.value} value={preset.value.toString()}>
+                                  {preset.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Longer videos (60s+) perform better on TikTok
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="targetPlatform"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Target Platform</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-platform">
+                                <SelectValue placeholder="Select platform" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {targetPlatforms.map(platform => (
+                                <SelectItem key={platform} value={platform}>
+                                  <div className="flex flex-col">
+                                    <span>{platformInfo[platform].label}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      {platformInfo[platform].description}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Viral Optimization Settings */}
+                <div className="border-t pt-6 space-y-4">
+                  <h3 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Viral Optimization
+                  </h3>
+                  
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="viralOptimization.hookStrength"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Opening Hook</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-hook">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="subtle">Subtle - Calm opener</SelectItem>
+                              <SelectItem value="medium">Medium - Engaging opener</SelectItem>
+                              <SelectItem value="strong">Strong - Attention-grabbing</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            How attention-grabbing the first 3 seconds are
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="viralOptimization.pacingStyle"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Pacing Style</FormLabel>
+                          <Select value={field.value} onValueChange={field.onChange}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-pacing">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="slow">Slow - Relaxed, meditative</SelectItem>
+                              <SelectItem value="medium">Medium - Natural flow</SelectItem>
+                              <SelectItem value="fast">Fast - High energy, quick cuts</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="viralOptimization.ctaEnabled"
+                    render={({ field }) => (
+                      <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="space-y-0.5">
+                          <FormLabel>Call-to-Action</FormLabel>
+                          <FormDescription>
+                            Add engagement prompts at the end
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                            data-testid="switch-cta"
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}
@@ -604,7 +773,7 @@ export default function NewVideo() {
                           name="subtitles.style"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Style</FormLabel>
+                              <FormLabel>Caption Style</FormLabel>
                               <Select value={field.value} onValueChange={field.onChange}>
                                 <FormControl>
                                   <SelectTrigger data-testid="select-subtitle-style">
@@ -612,31 +781,86 @@ export default function NewVideo() {
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="clean">Clean</SelectItem>
-                                  <SelectItem value="karaoke">Karaoke</SelectItem>
-                                  <SelectItem value="bold_outline">Bold Outline</SelectItem>
+                                  {captionStyles.map(style => (
+                                    <SelectItem key={style} value={style}>
+                                      <div className="flex flex-col">
+                                        <span>{captionStyleInfo[style].label}</span>
+                                        <span className="text-xs text-muted-foreground">{captionStyleInfo[style].description}</span>
+                                      </div>
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
+                              <FormDescription>
+                                Choose a style that matches your content vibe
+                              </FormDescription>
                             </FormItem>
                           )}
                         />
 
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="subtitles.position"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Position</FormLabel>
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <FormControl>
+                                    <SelectTrigger data-testid="select-subtitle-position">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="bottom">Bottom</SelectItem>
+                                    <SelectItem value="center">Center</SelectItem>
+                                    <SelectItem value="top">Top</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name="subtitles.fontSize"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Font Size</FormLabel>
+                                <Select value={field.value} onValueChange={field.onChange}>
+                                  <FormControl>
+                                    <SelectTrigger data-testid="select-subtitle-size">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="small">Small</SelectItem>
+                                    <SelectItem value="medium">Medium</SelectItem>
+                                    <SelectItem value="large">Large</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
                         <FormField
                           control={form.control}
-                          name="subtitles.position"
+                          name="subtitles.animation"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Position</FormLabel>
+                              <FormLabel>Animation</FormLabel>
                               <Select value={field.value} onValueChange={field.onChange}>
                                 <FormControl>
-                                  <SelectTrigger data-testid="select-subtitle-position">
+                                  <SelectTrigger data-testid="select-subtitle-animation">
                                     <SelectValue />
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="bottom">Bottom</SelectItem>
-                                  <SelectItem value="center">Center</SelectItem>
-                                  <SelectItem value="top">Top</SelectItem>
+                                  <SelectItem value="none">None</SelectItem>
+                                  <SelectItem value="fade">Fade In</SelectItem>
+                                  <SelectItem value="pop">Pop</SelectItem>
+                                  <SelectItem value="slide">Slide Up</SelectItem>
                                 </SelectContent>
                               </Select>
                             </FormItem>
@@ -660,7 +884,7 @@ export default function NewVideo() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="space-y-1">
                     <Label className="text-muted-foreground text-xs">Title</Label>
                     <p className="font-medium">{form.watch("title") || "Untitled"}</p>
@@ -673,6 +897,16 @@ export default function NewVideo() {
                     </p>
                   </div>
                   <div className="space-y-1">
+                    <Label className="text-muted-foreground text-xs">Duration</Label>
+                    <p className="font-medium">
+                      {durationPresets.find(p => p.value === form.watch("targetDurationSeconds"))?.label || `${form.watch("targetDurationSeconds")}s`}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground text-xs">Platform</Label>
+                    <p className="font-medium">{platformInfo[form.watch("targetPlatform")]?.label || form.watch("targetPlatform")}</p>
+                  </div>
+                  <div className="space-y-1">
                     <Label className="text-muted-foreground text-xs">Voice</Label>
                     <p className="font-medium capitalize">{form.watch("audio.voiceModel")}</p>
                   </div>
@@ -681,18 +915,20 @@ export default function NewVideo() {
                     <p className="font-medium">{form.watch("visual.scenesPerMinute")}</p>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-muted-foreground text-xs">Subtitles</Label>
+                    <Label className="text-muted-foreground text-xs">Caption Style</Label>
                     <p className="font-medium">
                       {form.watch("subtitles.enabled") 
-                        ? `${form.watch("subtitles.style")} (${form.watch("subtitles.position")})`
+                        ? `${captionStyleInfo[form.watch("subtitles.style") as CaptionStyle]?.label || form.watch("subtitles.style")} (${form.watch("subtitles.position")})`
                         : "Disabled"}
                     </p>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-muted-foreground text-xs">Music</Label>
-                    <p className="font-medium capitalize">
-                      {form.watch("audio.musicMode").replace(/_/g, ' ')}
-                    </p>
+                    <Label className="text-muted-foreground text-xs">Hook Strength</Label>
+                    <p className="font-medium capitalize">{form.watch("viralOptimization.hookStrength")}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-muted-foreground text-xs">Pacing</Label>
+                    <p className="font-medium capitalize">{form.watch("viralOptimization.pacingStyle")}</p>
                   </div>
                 </div>
 

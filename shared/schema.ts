@@ -60,6 +60,33 @@ export type StepStatus = typeof stepStatuses[number];
 export const visualGeneratorTypes = ['image_sequence', 'looping_clip', 'mixed'] as const;
 export type VisualGeneratorType = typeof visualGeneratorTypes[number];
 
+// Target Platforms
+export const targetPlatforms = ['tiktok', 'youtube_shorts', 'both'] as const;
+export type TargetPlatform = typeof targetPlatforms[number];
+
+// Caption Styles - different visual styles for subtitles
+export const captionStyles = [
+  'minimal',      // Clean, simple white text
+  'bold_shadow',  // Bold text with drop shadow
+  'gradient_pop', // Gradient colored text with pop effect
+  'karaoke',      // Word-by-word highlight animation style
+  'neon_glow',    // Neon glow effect
+  'comic_bold',   // Comic book style bold text
+  'elegant',      // Elegant serif with subtle animation
+  'street'        // Urban/street style with motion
+] as const;
+export type CaptionStyle = typeof captionStyles[number];
+
+// Video duration presets
+export const durationPresets = [
+  { value: 30, label: '30 seconds' },
+  { value: 45, label: '45 seconds' },
+  { value: 60, label: '60 seconds' },
+  { value: 90, label: '90 seconds (Recommended)' },
+  { value: 120, label: '2 minutes' },
+  { value: 180, label: '3 minutes' }
+] as const;
+
 // Zod Schemas for Settings
 export const visualSettingsSchema = z.object({
   generatorType: z.enum(visualGeneratorTypes).default('image_sequence'),
@@ -81,17 +108,29 @@ export const audioSettingsSchema = z.object({
 
 export const subtitleSettingsSchema = z.object({
   enabled: z.boolean().default(true),
-  style: z.enum(['clean', 'karaoke', 'bold_outline']).default('clean'),
-  position: z.enum(['bottom', 'center', 'top']).default('bottom')
+  style: z.enum(captionStyles).default('minimal'),
+  position: z.enum(['bottom', 'center', 'top']).default('bottom'),
+  fontSize: z.enum(['small', 'medium', 'large']).default('medium'),
+  animation: z.enum(['none', 'fade', 'pop', 'slide']).default('pop')
 });
 
 export const jobSettingsSchema = z.object({
   presetId: z.string().optional(),
   contentType: z.enum(contentTypes),
   contentConfig: z.record(z.any()).default({}),
+  // Duration and platform settings
+  targetDurationSeconds: z.number().int().min(15).max(300).default(90), // Default 90s for best viral potential
+  targetPlatform: z.enum(targetPlatforms).default('both'),
+  // Generation settings
   visual: visualSettingsSchema.default({}),
   audio: audioSettingsSchema.default({}),
-  subtitles: subtitleSettingsSchema.default({})
+  subtitles: subtitleSettingsSchema.default({}),
+  // Viral optimization settings
+  viralOptimization: z.object({
+    hookStrength: z.enum(['subtle', 'medium', 'strong']).default('strong'), // How attention-grabbing the opening is
+    pacingStyle: z.enum(['slow', 'medium', 'fast']).default('fast'), // Pacing for engagement
+    ctaEnabled: z.boolean().default(true) // Call-to-action at end
+  }).default({})
 });
 
 export type VisualSettings = z.infer<typeof visualSettingsSchema>;
@@ -292,4 +331,23 @@ export const contentTypeInfo: Record<ContentType, { label: string; description: 
   language_mini_lesson: { label: 'Language Lesson', description: 'Quick language phrases', icon: 'Languages' },
   mini_history: { label: 'Mini History', description: 'Historical facts and events', icon: 'Clock' },
   science_mini_fact: { label: 'Science Facts', description: 'Scientific mini facts', icon: 'Atom' }
+};
+
+// Caption style display info
+export const captionStyleInfo: Record<CaptionStyle, { label: string; description: string }> = {
+  minimal: { label: 'Minimal', description: 'Clean white text, simple and readable' },
+  bold_shadow: { label: 'Bold Shadow', description: 'Bold text with drop shadow for contrast' },
+  gradient_pop: { label: 'Gradient Pop', description: 'Colorful gradient text with pop animation' },
+  karaoke: { label: 'Karaoke', description: 'Word-by-word highlight as audio plays' },
+  neon_glow: { label: 'Neon Glow', description: 'Glowing neon effect for attention' },
+  comic_bold: { label: 'Comic Bold', description: 'Comic book style bold text' },
+  elegant: { label: 'Elegant', description: 'Elegant serif font with subtle animation' },
+  street: { label: 'Street', description: 'Urban street style with motion effects' }
+};
+
+// Platform display info
+export const platformInfo: Record<TargetPlatform, { label: string; description: string; maxDuration: number }> = {
+  tiktok: { label: 'TikTok', description: 'Optimized for TikTok algorithm', maxDuration: 180 },
+  youtube_shorts: { label: 'YouTube Shorts', description: 'Optimized for YouTube Shorts', maxDuration: 60 },
+  both: { label: 'Both Platforms', description: 'Works great on TikTok and YouTube Shorts', maxDuration: 60 }
 };
