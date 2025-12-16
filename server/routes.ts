@@ -7,7 +7,6 @@ import { ObjectPermission } from "./objectAcl";
 import { insertJobSchema, insertPresetSchema, jobSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
-import { randomUUID } from "crypto";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<void> {
   // ===================
@@ -63,7 +62,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Create job
       const job = await storage.createJob({
-        id: randomUUID(),
         title: title || `New ${settings.contentType} Video`,
         contentType: settings.contentType,
         settings: settingsResult.data,
@@ -91,11 +89,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       // Create new job with same settings
+      const parsedSettings = jobSettingsSchema.parse(originalJob.settings);
       const newJob = await storage.createJob({
-        id: randomUUID(),
         title: originalJob.title,
         contentType: originalJob.contentType,
-        settings: originalJob.settings,
+        settings: parsedSettings,
         status: "queued",
         progressPercent: 0
       });
@@ -161,10 +159,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Create preset
   app.post("/api/presets", async (req: Request, res: Response) => {
     try {
-      const validationResult = insertPresetSchema.safeParse({
-        ...req.body,
-        id: randomUUID()
-      });
+      const validationResult = insertPresetSchema.safeParse(req.body);
 
       if (!validationResult.success) {
         const validationError = fromZodError(validationResult.error);
@@ -256,6 +251,93 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error updating settings:", error);
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  // ===================
+  // ANALYTICS ROUTES
+  // ===================
+
+  app.get("/api/analytics", async (_req: Request, res: Response) => {
+    try {
+      const allJobs = await storage.getJobs({});
+      
+      const completedJobs = allJobs.filter(j => j.status === "completed");
+      const failedJobs = allJobs.filter(j => j.status === "failed");
+      const processingJobs = allJobs.filter(j => 
+        !["completed", "failed", "queued"].includes(j.status)
+      );
+      
+      const successRate = allJobs.length > 0 
+        ? (completedJobs.length / allJobs.length) * 100 
+        : 0;
+      
+      const durationsWithValue = completedJobs
+        .filter(j => j.durationSeconds && j.durationSeconds > 0)
+        .map(j => j.durationSeconds!);
+      const avgDurationSeconds = durationsWithValue.length > 0
+        ? durationsWithValue.reduce((a, b) => a + b, 0) / durationsWithValue.length
+        : 0;
+      
+      const totalVideoDurationMinutes = durationsWithValue.reduce((a, b) => a + b, 0) / 60;
+      
+      const processingTimesMinutes = completedJobs
+        .filter(j => j.createdAt && j.updatedAt)
+        .map(j => {
+          const created = new Date(j.createdAt);
+          const updated = new Date(j.updatedAt);
+          if (isNaN(created.getTime()) || isNaN(updated.getTime())) return null;
+          return (updated.getTime() - created.getTime()) / (1000 * 60);
+        })
+        .filter((t): t is number => t !== null && t > 0);
+      
+      const avgProcessingTimeMinutes = processingTimesMinutes.length > 0
+        ? processingTimesMinutes.reduce((a, b) => a + b, 0) / processingTimesMinutes.length
+        : 0;
+      
+      const contentTypeBreakdown: Record<string, number> = {};
+      const statusBreakdown: Record<string, number> = {};
+      
+      for (const job of allJobs) {
+        contentTypeBreakdown[job.contentType] = (contentTypeBreakdown[job.contentType] || 0) + 1;
+        statusBreakdown[job.status] = (statusBreakdown[job.status] || 0) + 1;
+      }
+      
+      const last7Days: { date: string; count: number }[] = [];
+      const now = new Date();
+      
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        
+        const count = allJobs.filter(j => {
+          if (!j.createdAt) return false;
+          const jobDateObj = new Date(j.createdAt);
+          if (isNaN(jobDateObj.getTime())) return false;
+          const jobDate = jobDateObj.toISOString().split('T')[0];
+          return jobDate === dateStr;
+        }).length;
+        
+        last7Days.push({ date: dateStr, count });
+      }
+      
+      res.json({
+        totalJobs: allJobs.length,
+        completedJobs: completedJobs.length,
+        failedJobs: failedJobs.length,
+        processingJobs: processingJobs.length,
+        successRate,
+        avgDurationSeconds,
+        avgProcessingTimeMinutes,
+        contentTypeBreakdown,
+        statusBreakdown,
+        last7Days,
+        totalVideoDurationMinutes
+      });
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      res.status(500).json({ error: "Failed to fetch analytics" });
     }
   });
 

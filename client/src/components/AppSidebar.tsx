@@ -17,7 +17,8 @@ import {
   Bookmark, 
   Settings,
   Video,
-  Sparkles
+  Sparkles,
+  BarChart3
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -31,6 +32,11 @@ const mainNavItems = [
     title: "New Video",
     url: "/new",
     icon: PlusCircle,
+  },
+  {
+    title: "Analytics",
+    url: "/analytics",
+    icon: BarChart3,
   },
   {
     title: "Presets",

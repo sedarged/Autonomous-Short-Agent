@@ -9,6 +9,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import Dashboard from "@/pages/Dashboard";
 import NewVideo from "@/pages/NewVideo";
 import JobDetail from "@/pages/JobDetail";
+import Analytics from "@/pages/Analytics";
 import Presets from "@/pages/Presets";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/new" component={NewVideo} />
       <Route path="/jobs/:id" component={JobDetail} />
+      <Route path="/analytics" component={Analytics} />
       <Route path="/presets" component={Presets} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
