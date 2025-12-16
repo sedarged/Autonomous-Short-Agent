@@ -1,0 +1,559 @@
+You are Replit Agent.
+You will design and build a full-stack, production-grade web app on Replit that automatically creates TikTok / YouTube Shorts videos from scratch using only AI-generated media (no Pexels, no stock footage).
+
+The app is for a single user (me) and should prioritise:
+	•	Multi-niche faceless content (many popular formats).
+	•	Low cost per video while still looking human-made and high quality.
+	•	Full pipeline visibility (steps, progress %, ETA, logs).
+	•	A clean, fast frontend “control cockpit”.
+
+Follow this spec carefully and build the app in phases.
+Use Replit’s recommended patterns: Replit App, Nix-based env, .replit + replit.nix, and appropriate templates (Next.js or Node) per official docs.
+
+⸻
+
+1. PRODUCT OVERVIEW
+
+Working name: Multi-Niche AI Shorts Studio
+
+Core idea:
+From a single UI, I choose a content type (e.g. Reddit story, Would-You-Rather, facts list, quiz, etc.), set some options or pick a preset, click Generate, and the system:
+	1.	Generates script/structure via LLM.
+	2.	Breaks it into scenes.
+	3.	Generates all visuals via AI (images and/or short loops).
+	4.	Generates voiceover via TTS (+ optional AI music).
+	5.	Renders a vertical 9:16 video with text overlays, motion, and subtitles.
+	6.	Generates a caption and hashtags.
+	7.	Exposes the final MP4 + caption in the UI, with full job history and progress.
+
+No stock footage (Pexels, Pixabay, etc.) is allowed.
+Every visual asset must come from text→image/video models.
+
+⸻
+
+2. SUPPORTED NICHES & VIDEO TYPES
+
+The app must support these content types out of the box, all fully AI-generated:
+
+2.1 Narrative & Story
+	•	reddit_story – Reddit-style story:
+	•	Input: Reddit URL, pasted text, or theme for AI to invent.
+	•	aita_story / confessions.
+	•	two_sentence_horror / micro horror.
+	•	short_story_generic – short fiction:
+	•	Genres: horror, sci-fi, romance, comedy, thriller, slice-of-life.
+
+2.2 Interactive / Game / Question-Based
+	•	would_you_rather
+	•	this_or_that
+	•	quiz_trivia:
+	•	True/False and multiple choice.
+	•	riddles / brain teasers.
+	•	guessing_game:
+	•	Guess the country/animal/movie from hints.
+
+2.3 Lists / Facts / Info
+	•	facts / shower thoughts (e.g. creepy facts, space facts).
+	•	top_list (Top 5 / Top 10).
+	•	“Did you know?” micro clips.
+	•	Life / productivity / study tips.
+	•	Simple money/career tips (non-advice style “ideas”, not regulated advice).
+
+2.4 Inspiration / Opinion
+	•	motivation – motivational quotes/stories.
+	•	affirmations / mindset.
+	•	“Say this instead of that”.
+	•	Relationship green/red flags lists.
+
+2.5 Learning & Micro-Education
+	•	language_mini_lesson – e.g. 3 useful EN/PL phrases.
+	•	mini_history / “On this day”.
+	•	Simple science / school facts.
+
+Design the system so adding new contentType later is easy.
+
+⸻
+
+3. COST & QUALITY STRATEGY
+
+The video generation must be relatively cheap but visually good:
+
+3.1 Visuals (AI-only, cheap)
+	•	Default approach: image sequence with motion:
+	•	Generate 3–8 AI images per video (per content & style).
+	•	Use ffmpeg (or similar) to add zoom/pan/rotate (Ken Burns effect).
+	•	Optional presets may use short AI video loops (2–4s), reused across scenes.
+	•	Resolution: 1080x1920, ~30 fps.
+	•	Bitrate tuned for Shorts/TikTok (e.g. 3–6 Mbps) to keep size & cost reasonable.
+
+3.2 LLM Usage
+	•	Use prompt templates per contentType.
+	•	Scripts should have:
+	•	Strong hook (first 1–2 lines).
+	•	Tight body.
+	•	CTA (e.g. “What would you choose?”, “Follow for more”).
+	•	If possible, use cheaper models for main draft and only polish with a more powerful model when needed.
+	•	Aim for 30–90s videos by default.
+
+3.3 Audio (TTS + Music)
+	•	Use a natural TTS API, support several voices.
+	•	Ensure the script is punctuated for human-like pacing.
+	•	Optional background music:
+	•	AI-generated or a reusable loop.
+	•	Apply automatic ducking under speech.
+
+⸻
+
+4. SYSTEM ARCHITECTURE
+
+Use a standard Replit full-stack web app architecture:
+	1.	Frontend:
+	•	Next.js with TypeScript (App Router) OR React SPA with Node backend.
+	•	Tailwind CSS + simple component library (e.g. shadcn/ui) for fast UI.
+	2.	Backend API:
+	•	Node/Express or Next.js API routes.
+	•	REST endpoints for jobs, presets, settings.
+	3.	Database:
+	•	Use Postgres (or a Replit-compatible DB) with an ORM like Prisma or Drizzle.
+	4.	Job Queue & Worker:
+	•	Background worker process (or long-running job runner).
+	•	Handles AI calls and ffmpeg rendering.
+	5.	Storage:
+	•	S3-compatible bucket (or similar) for videos, audio, images, subtitles.
+	6.	AI Providers:
+	•	Wrap LLM, image, video, TTS, and (optionally) music APIs behind internal services so they can be swapped later.
+
+Respect Replit App configuration:
+	•	Use .replit and replit.nix to configure Node version, dependencies, build & run commands, and any system tools (like ffmpeg).
+	•	Use Replit’s Nix/dependency management features correctly.
+	•	Use Replit’s deployment system to publish the app, not filesystem writes, as filesystem is not persistent in deployments.
+
+⸻
+
+5. DATA MODEL (TYPES & DB)
+
+5.1 Core Types
+
+type ContentType =
+  | 'reddit_story'
+  | 'aita_story'
+  | 'two_sentence_horror'
+  | 'short_story_generic'
+  | 'would_you_rather'
+  | 'this_or_that'
+  | 'quiz_trivia'
+  | 'riddles'
+  | 'guessing_game'
+  | 'facts'
+  | 'top_list'
+  | 'motivation'
+  | 'affirmations'
+  | 'language_mini_lesson'
+  | 'mini_history'
+  | 'science_mini_fact';
+
+type JobStatus =
+  | 'queued'
+  | 'running'
+  | 'generating_script'
+  | 'generating_assets'
+  | 'rendering_video'
+  | 'generating_caption'
+  | 'completed'
+  | 'failed';
+
+type StepStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed';
+
+5.2 Visual / Audio / Subtitles
+
+type VisualGeneratorType = 'image_sequence' | 'looping_clip' | 'mixed';
+
+interface VisualSettings {
+  generatorType: VisualGeneratorType;
+  stylePrompt?: string;
+  aspectRatio?: '9:16';
+  fps?: number;
+  scenesPerMinute?: number;
+  allowCharacterCloseups?: boolean;
+}
+
+interface AudioSettings {
+  voiceModel?: string;
+  speakingStyle?: string;
+  language?: 'en' | 'pl' | 'mixed';
+  musicMode?: 'none' | 'ai_music' | 'loop_from_library';
+  musicPrompt?: string;
+  duckMusicUnderVoice?: boolean;
+}
+
+interface SubtitleSettings {
+  enabled: boolean;
+  style?: 'clean' | 'karaoke' | 'bold_outline';
+  position?: 'bottom' | 'center' | 'top';
+}
+
+5.3 Scene Model
+
+interface Scene {
+  id: string;
+  index: number;
+  startTime: number;
+  endTime: number;
+  textOverlay?: string;
+  voiceSegmentText?: string;
+  backgroundPrompt?: string;
+  backgroundAssetUrl?: string;
+}
+
+5.4 JobSettings / Job / Preset Types
+
+interface JobSettings {
+  presetId?: string;
+  contentType: ContentType;
+  contentConfig: any; // content-type specific JSON config
+  visual: VisualSettings;
+  audio: AudioSettings;
+  subtitles: SubtitleSettings;
+}
+
+interface JobSummary {
+  id: string;
+  title: string;
+  status: JobStatus;
+  contentType: ContentType;
+  createdAt: string;
+  updatedAt: string;
+  durationSeconds?: number;
+  thumbnailUrl?: string;
+  progressPercent: number;
+  etaSeconds?: number;
+}
+
+interface JobDetail extends JobSummary {
+  settings: JobSettings;
+  scriptText?: string;
+  caption?: string;
+  hashtags?: string[];
+  steps: JobStep[];
+  videoUrl?: string;
+  audioUrl?: string;
+  subtitlesUrl?: string;
+  errorMessage?: string;
+}
+
+interface JobStep {
+  id: string;
+  jobId: string;
+  stepType: 'script' | 'assets_visual' | 'assets_audio' | 'video' | 'caption';
+  status: StepStatus;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+}
+
+interface Preset {
+  id: string;
+  name: string;
+  description?: string;
+  contentType: ContentType;
+  settings: JobSettings;
+  defaultTitleTemplate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+5.5 DB Tables (Prisma or similar)
+
+Create at least:
+	•	jobs
+	•	job_steps
+	•	assets
+	•	presets
+	•	settings (key/value JSON for global defaults & stats)
+
+Store JobSettings and other structured data as JSON in the DB where convenient.
+
+⸻
+
+6. API DESIGN
+
+Implement REST endpoints (Next API routes or Express):
+
+6.1 Jobs
+	•	POST /api/jobs
+	•	Body: JobSettings + optional title.
+	•	Creates job (status queued), enqueues processing.
+	•	Returns JobSummary.
+	•	GET /api/jobs
+	•	Query: status, contentType, limit, offset.
+	•	Returns array of JobSummary.
+	•	GET /api/jobs/:id
+	•	Returns JobDetail.
+	•	POST /api/jobs/:id/regenerate
+	•	Creates a new job with same settings.
+
+6.2 Presets
+	•	GET /api/presets
+	•	POST /api/presets
+	•	PUT /api/presets/:id
+	•	DELETE /api/presets/:id
+
+6.3 Settings
+	•	GET /api/settings
+	•	PUT /api/settings
+
+⸻
+
+7. JOB LIFECYCLE & PIPELINE
+
+Implement a worker that processes jobs through these steps:
+	1.	Job Created
+	•	Job stored as queued.
+	•	progressPercent = 0, ETA estimated using historical averages.
+	2.	Generate Script / Structured Content (generating_script)
+	•	Use LLM with contentType-specific prompt to produce:
+	•	Narratives for story types.
+	•	JSON of questions/options/answers for quiz/trivia/riddles.
+	•	Lists of facts/top items.
+	•	Lines for motivation/affirmations/language lessons etc.
+	•	Save script/JSON to DB.
+	•	Build Scene[] (including approximate timings).
+	•	Update job step & progress.
+	3.	Plan & Generate Visual Assets (generating_assets → visuals)
+	•	For each scene, derive backgroundPrompt.
+	•	Call AI image/video model to create backgrounds.
+	•	Store assets in storage, save URLs in assets table.
+	•	Update progress.
+	4.	Generate Audio (generating_assets → audio)
+	•	Use TTS to create voiceover for script/segments.
+	•	Optionally generate AI music or pick a loop.
+	•	Save audio in storage & DB.
+	•	Update progress.
+	5.	Render Video (rendering_video)
+	•	Use ffmpeg (or equivalent) to:
+	•	Compose scenes with backgrounds.
+	•	Apply pans/zooms/motion.
+	•	Overlay text & subtitles.
+	•	Mix voice + music with correct volumes.
+	•	Export vertical MP4, store in storage, save URL.
+	•	Generate a thumbnail.
+	6.	Caption & Hashtags (generating_caption)
+	•	Use LLM to generate:
+	•	Title/hook.
+	•	Caption text.
+	•	Hashtags array.
+	•	Save to DB.
+	7.	Complete
+	•	Set job.status = completed.
+	•	progressPercent = 100, ETA cleared.
+	8.	Error Handling
+	•	On any failure, set job and corresponding job_step to failed with errorMessage.
+
+7.1 Progress & ETA
+	•	Track per-step duration averages (per contentType).
+	•	Compute progressPercent as weighted completion of steps.
+	•	Compute etaSeconds as sum of remaining average durations.
+	•	Update both frequently so frontend can show realistic progress.
+
+⸻
+
+8. FRONTEND – PAGES & UX
+
+Use Next.js + TS + Tailwind (and shadcn/ui if you like).
+
+8.1 Layout & Navigation
+	•	Top nav:
+	•	Dashboard (/)
+	•	New Video (/new)
+	•	Presets (/presets)
+	•	Settings (/settings)
+	•	Dark-friendly theme, responsive but desktop-first.
+
+8.2 Dashboard (/)
+	•	Quick Create card:
+	•	contentType dropdown.
+	•	Single prompt/input field adapted to type (placeholder changes).
+	•	Preset dropdown.
+	•	“Generate video” button → POST /api/jobs → redirect to /jobs/[id].
+	•	Recent Jobs table:
+	•	Columns:
+	•	Thumbnail.
+	•	Title.
+	•	Content type.
+	•	Status chip.
+	•	Progress bar (progressPercent).
+	•	ETA (“~45s remaining”).
+	•	Created time.
+	•	Action to open job detail.
+	•	Filters:
+	•	By contentType & status.
+	•	Polling every 10–15 seconds or manual refresh button.
+
+8.3 New Video (/new)
+	•	Step 1: Content Type selector.
+	•	Step 2: Dynamic content config based on contentType:
+	•	Reddit/AITA: mode (url / raw_text / ai_generated), URL, raw text, theme.
+	•	WYR/This or That: topic, count, timer on/off, or manual pairs.
+	•	Quiz/Trivia: topic, count, format (TF/MCQ), timer.
+	•	Facts/Top List: topic, item count.
+	•	Motivation/Affirmations: AI vs custom lines, vibe.
+	•	Language/History/Science: topic and count.
+	•	Step 3: Visual & Audio panel:
+	•	Visual: generatorType, stylePrompt, scenesPerMinute.
+	•	Audio: voiceModel, speakingStyle, language, musicMode/prompt.
+	•	Subtitles: enabled, style, position.
+	•	Step 4: Preset bar:
+	•	Apply preset.
+	•	Save current config as preset (modal asks for name/description).
+	•	Step 5: Actions:
+	•	Generate video.
+	•	Optional: Preview script (if you implement a script-only endpoint later).
+
+8.4 Job Detail (/jobs/[id])
+	•	Header:
+	•	Title (editable).
+	•	contentType badge.
+	•	Status chip.
+	•	Created / Updated timestamps.
+	•	Pipeline view:
+	•	Timeline with steps:
+	•	Script → Assets (Visual) → Assets (Audio) → Render → Caption.
+	•	Each has:
+	•	Icon.
+	•	Status.
+	•	If running: spinner + per-step ETA.
+	•	Global progress & ETA:
+	•	Progress bar using progressPercent.
+	•	“Estimated time remaining: ~XXs/min”.
+	•	Video preview:
+	•	HTML <video> player for the final MP4.
+	•	Button to open video in new tab.
+	•	Button to download MP4.
+	•	Content & caption:
+	•	Show generated script or structured content nicely formatted.
+	•	Show caption + hashtags.
+	•	Buttons:
+	•	“Copy caption”.
+	•	“Copy hashtags only”.
+	•	“Copy script”.
+	•	Assets list:
+	•	Links to audio, subtitles, images if I want to inspect.
+	•	Actions:
+	•	“Regenerate with same settings”.
+	•	“Clone to New” (open /new pre-filled).
+	•	Poll GET /api/jobs/:id every 3–5 seconds while job is not completed/failed.
+
+8.5 Presets (/presets)
+	•	List of presets:
+	•	Name, contentType, description, createdAt.
+	•	Actions: Use, Edit, Delete.
+	•	Editor:
+	•	Same config fields as in New Video (content + visual/audio/subtitles).
+	•	Save updates.
+
+8.6 Settings (/settings)
+	•	Global defaults:
+	•	Default contentType for Quick Create.
+	•	Default language.
+	•	Default duration target.
+	•	Visual defaults:
+	•	Optional: default style prompts per contentType.
+	•	Store settings in DB (settings table).
+
+⸻
+
+9. REPLIT-SPECIFIC REQUIREMENTS
+
+Use Replit correctly:
+	1.	Base Template
+	•	Start from a Replit Next.js or Node.js template as recommended in Replit docs.
+	2.	Configuration
+	•	Configure .replit and replit.nix:
+	•	Node version.
+	•	npm dependencies.
+	•	ffmpeg availability (via Nix packages).
+	•	Build command (npm run build) and run command (npm run start or equivalent).
+	3.	Dependencies
+	•	Use stable npm libs:
+	•	Web/API: Next.js, React, TypeScript, zod, etc.
+	•	DB: prisma (or Drizzle) + a Postgres-compatible DB.
+	•	Queue: bullmq (if Redis) or a DB-backed queue if simpler.
+	•	Video: ffmpeg-static and/or fluent-ffmpeg.
+	•	HTTP: axios or node-fetch.
+	•	Logging: pino or winston.
+	4.	Deployments
+	•	Use Replit Deployments properly (Autoscale or Static depending on architecture).
+	•	Do NOT rely on published app filesystem for persistent data; use DB and object storage instead.
+
+If some service (e.g. Redis) is not trivial on Replit, you can implement a simpler DB-based queue for jobs.
+
+⸻
+
+10. IMPLEMENTATION PHASES (DO THESE IN ORDER)
+
+Phase 1 – Project Setup & Schema
+	•	Create the app on Replit using appropriate Next.js or Node template.
+	•	Set up .replit and replit.nix for Node, ffmpeg, etc.
+	•	Add Prisma (or chosen ORM) and define schema for:
+	•	jobs, job_steps, assets, presets, settings.
+	•	Run initial migration.
+
+Phase 2 – Core API & Basic Frontend
+	•	Implement /api/jobs (create, list, detail) and /api/presets.
+	•	Build:
+	•	Dashboard with Quick Create + Jobs table (using real APIs).
+	•	New Video form (basic version).
+	•	Job Detail page (fetch + display job info, no real pipeline yet).
+	•	Use React Query or SWR for data fetching & polling.
+
+Phase 3 – Job Queue & Dummy Pipeline
+	•	Implement a simple job queue and worker:
+	•	Worker pulls queued jobs.
+	•	Simulate each step with setTimeout and log updates to DB.
+	•	Ensure:
+	•	Status changes propagate correctly.
+	•	Pipeline view & progress UI work end-to-end with dummy data.
+
+Phase 4 – Real AI Integration (Minimal)
+	•	Integrate actual LLM for script/content generation.
+	•	Integrate AI image generator for backgrounds.
+	•	Integrate TTS for voiceover.
+	•	Implement basic ffmpeg video composition:
+	•	Static images per scene + crossfade + text overlays.
+	•	Store outputs in object storage; store URLs in DB.
+
+Phase 5 – Niche Templates & Cost Optimisation
+	•	Implement contentType-specific prompt templates for all types listed above.
+	•	Ensure default path is cost-effective:
+	•	Use image sequences + motion.
+	•	Only use AI video loops when requested by a preset.
+	•	Track average duration per step to improve ETA.
+
+Phase 6 – Polish & QoL Features
+	•	Improve:
+	•	Text animation/transitions.
+	•	Subtitle styling.
+	•	Captions & hashtags prompts.
+	•	Add:
+	•	Filters & search on Dashboard.
+	•	Dark mode toggle.
+	•	“Regenerate”, “Clone to New”, and Preset UX niceties.
+
+⸻
+
+11. HOW TO INTERACT WITH ME
+	•	Assume I am the only user.
+	•	Ask me only when you absolutely need:
+	•	API keys / secrets for AI providers.
+	•	Choice between specific providers (if required).
+	•	Otherwise:
+	•	Make reasonable, modern choices and keep code modular so providers can be swapped.
+
+Start now by:
+	1.	Creating the Replit app with the appropriate template (Next.js recommended).
+	2.	Setting up basic project structure, .replit, replit.nix, and database schema.
+	3.	Reporting back in the chat with what you’ve scaffolded and what’s next.
