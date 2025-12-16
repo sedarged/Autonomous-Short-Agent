@@ -10,9 +10,20 @@ import { contentTypeInfo, premiumContentTypes } from "@shared/schema";
 // Dummy mode for testing without AI costs
 export const DUMMY_MODE = process.env.DUMMY_MODE === 'true';
 
+// Block DUMMY_MODE in production to prevent accidental fake content
+if (DUMMY_MODE && process.env.NODE_ENV === 'production') {
+  console.error('[FATAL] DUMMY_MODE cannot be enabled in production environment');
+  process.exit(1);
+}
+
+// Log warning if DUMMY_MODE is active
+if (DUMMY_MODE) {
+  console.warn('[AI] DUMMY_MODE is enabled - all AI calls will return test data');
+}
+
 // Tiered model strategy for cost optimization
 // Premium model for creative content that requires high quality
-const PREMIUM_MODEL = "gpt-5";
+const PREMIUM_MODEL = "gpt-4o";
 // Economy model for simple, structured tasks (prompts, captions)
 const ECONOMY_MODEL = "gpt-4o-mini";
 
