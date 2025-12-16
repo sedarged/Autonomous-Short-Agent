@@ -49,8 +49,16 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      
+      // In production, don't log response bodies (may contain sensitive data)
+      // In development, log truncated response for debugging
+      if (capturedJsonResponse && process.env.NODE_ENV !== "production") {
+        const responseStr = JSON.stringify(capturedJsonResponse);
+        // Truncate long responses to prevent log spam
+        const truncated = responseStr.length > 500 
+          ? responseStr.substring(0, 500) + "...[truncated]" 
+          : responseStr;
+        logLine += ` :: ${truncated}`;
       }
 
       log(logLine);

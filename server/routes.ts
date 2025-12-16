@@ -208,6 +208,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Schema for updating presets - only allow specific fields
+  const presetUpdateSchema = z.object({
+    name: z.string().min(1).max(100).optional(),
+    contentType: z.enum(contentTypes).optional(),
+    settings: jobSettingsSchema.optional(),
+  }).strict();
+
   // Update preset
   app.put("/api/presets/:id", async (req: Request, res: Response) => {
     try {
@@ -217,7 +224,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ error: "Preset not found" });
       }
 
-      const updated = await storage.updatePreset(req.params.id, req.body);
+      // Validate update data
+      const validationResult = presetUpdateSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        const validationError = fromZodError(validationResult.error);
+        return res.status(400).json({ error: validationError.message });
+      }
+
+      const updated = await storage.updatePreset(req.params.id, validationResult.data);
       res.json(updated);
     } catch (error) {
       console.error("Error updating preset:", error);
@@ -410,14 +424,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Schema for allowed settings - prevents arbitrary key injection
+  const settingsUpdateSchema = z.object({
+    defaultVoice: z.string().optional(),
+    defaultLanguage: z.enum(["en", "pl", "mixed"]).optional(),
+    defaultScenesPerMinute: z.number().min(2).max(12).optional(),
+    defaultSubtitlesEnabled: z.boolean().optional(),
+    defaultSubtitleStyle: z.enum(["clean", "karaoke", "bold_outline"]).optional(),
+    autoPollingInterval: z.number().min(5).max(60).optional(),
+    maxConcurrentJobs: z.number().min(1).max(5).optional(),
+    budgetMode: z.boolean().optional(),
+    isMonetized: z.boolean().optional(),
+  }).strict(); // Reject any unknown keys
+
   // Update settings
   app.put("/api/settings", async (req: Request, res: Response) => {
     try {
-      const updates = req.body;
+      // Validate settings against allowed schema
+      const validationResult = settingsUpdateSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        const validationError = fromZodError(validationResult.error);
+        return res.status(400).json({ error: validationError.message });
+      }
+
+      const updates = validationResult.data;
       
-      // Save each setting
+      // Save each validated setting
       for (const [key, value] of Object.entries(updates)) {
-        await storage.setSetting(key, value);
+        if (value !== undefined) {
+          await storage.setSetting(key, value);
+        }
       }
 
       const allSettings = await storage.getAllSettings();
