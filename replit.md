@@ -6,6 +6,14 @@ This is a full-stack web application for automatically generating TikTok/YouTube
 
 The system provides full pipeline visibility with job tracking, progress percentages, ETAs, and logs through a clean dashboard interface designed for workflow efficiency.
 
+### Key Features
+- **Duration Control**: 15-300 second video duration with presets for TikTok (60s), YouTube Shorts (90s), and long-form (180s)
+- **Multi-Platform Support**: Optimized for TikTok, YouTube Shorts, and Instagram Reels with platform-specific AI guidance
+- **8 Caption Styles**: bold, minimal, gradient, neon, typewriter, highlight, shadow, and classic styles
+- **Viral Optimization**: Hook strength, pacing style, and CTA controls for maximizing engagement
+- **AI Topic Suggestions**: Research-based viral trend recommendations for content ideas
+- **Conversational Editing**: Natural language chat interface to modify captions and hashtags post-generation
+
 ## IMPORTANT RULES
 
 ### Design Freeze
