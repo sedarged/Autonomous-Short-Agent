@@ -282,6 +282,68 @@ export async function generateCaptionAndHashtags(
   };
 }
 
+// Regenerate caption with user feedback
+export async function regenerateCaptionWithFeedback(
+  contentType: ContentType,
+  script: string,
+  currentCaption: string | undefined,
+  currentHashtags: string[] | undefined,
+  userFeedback: string
+): Promise<{ caption: string; hashtags: string[] }> {
+  // Dummy mode: return modified caption
+  if (DUMMY_MODE) {
+    return {
+      caption: `Updated: ${currentCaption || 'Check this out!'} (based on your feedback)`,
+      hashtags: [...(currentHashtags || ['viral', 'trending']), 'updated']
+    };
+  }
+
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.chat.completions.create({
+          model: ECONOMY_MODEL,
+          messages: [
+            { 
+              role: "system", 
+              content: `You are a social media expert. Update video captions based on user feedback.
+                       Keep captions short, punchy, and attention-grabbing.
+                       Include 5-8 relevant hashtags (without the # symbol).
+                       Incorporate the user's feedback while maintaining viral appeal.`
+            },
+            { 
+              role: "user", 
+              content: `Update this ${contentTypeInfo[contentType].label} video caption based on user feedback.
+                       
+Current caption: "${currentCaption || '(none)'}"
+Current hashtags: ${currentHashtags?.join(', ') || '(none)'}
+Script excerpt: "${script.slice(0, 300)}..."
+
+User feedback: "${userFeedback}"
+
+Return JSON: { "caption": "...", "hashtags": ["tag1", "tag2", ...] }`
+            }
+          ],
+          response_format: { type: "json_object" },
+          max_completion_tokens: 256,
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 1000 }
+  );
+
+  const content = response.choices[0]?.message?.content || "{}";
+  const parsed = JSON.parse(content);
+  return {
+    caption: parsed.caption || currentCaption || "",
+    hashtags: parsed.hashtags || currentHashtags || []
+  };
+}
+
 // Generate trending topic suggestions for a content type
 export async function suggestTrendingTopics(
   contentType: ContentType

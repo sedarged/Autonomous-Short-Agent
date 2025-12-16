@@ -34,6 +34,60 @@ interface RenderResult {
   integrityCheck: IntegrityCheck;
 }
 
+// Get audio duration using ffprobe with retry logic
+export async function getAudioDuration(audioPath: string, retries = 3): Promise<number> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const duration = await new Promise<number>((resolve, reject) => {
+        const proc = spawn('ffprobe', [
+          '-v', 'error',
+          '-show_entries', 'format=duration',
+          '-of', 'json',
+          audioPath
+        ]);
+        
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => stdout += d);
+        proc.stderr.on('data', d => stderr += d);
+        
+        proc.on('close', code => {
+          if (code !== 0) {
+            return reject(new Error(`ffprobe exited with code ${code}: ${stderr.slice(0, 200)}`));
+          }
+          
+          try {
+            const data = JSON.parse(stdout);
+            const dur = parseFloat(data.format?.duration || '0');
+            if (dur > 0) {
+              resolve(dur);
+            } else {
+              reject(new Error('Invalid duration: 0 or negative'));
+            }
+          } catch (e) {
+            reject(new Error(`Failed to parse ffprobe output: ${e}`));
+          }
+        });
+        
+        proc.on('error', (err) => {
+          reject(new Error(`ffprobe spawn error: ${err.message}`));
+        });
+      });
+      
+      return duration;
+    } catch (err) {
+      console.error(`[Renderer] Audio duration detection attempt ${attempt}/${retries} failed:`, err);
+      if (attempt === retries) {
+        throw new Error(`Failed to detect audio duration after ${retries} attempts: ${err}`);
+      }
+      // Wait before retry
+      await new Promise(r => setTimeout(r, 500 * attempt));
+    }
+  }
+  
+  throw new Error('Audio duration detection failed');
+}
+
 // Check video integrity using ffprobe
 export async function checkVideoIntegrity(videoPath: string): Promise<IntegrityCheck> {
   return new Promise((resolve) => {
@@ -154,8 +208,9 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
   console.log(`[Renderer] Starting render for job ${jobId} with ${scenes.length} scenes at ${fps}fps`);
   
   try {
-    const sceneDuration = 5;
-    const totalDuration = scenes.length * sceneDuration;
+    // Use scene-specific durations based on audio length, fallback to 5s
+    const sceneDurations: number[] = scenes.map(scene => scene.audioDurationSeconds || 5);
+    const totalDuration = sceneDurations.reduce((sum, d) => sum + d, 0);
     
     const imageFiles: string[] = [];
     const audioFiles: string[] = [];
@@ -192,8 +247,8 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     }
     
     const inputListPath = path.join(tempDir, 'inputs.txt');
-    const inputListContent = imageFiles.map(f => {
-      return `file '${f}'\nduration ${sceneDuration}`;
+    const inputListContent = imageFiles.map((f, i) => {
+      return `file '${f}'\nduration ${sceneDurations[i]}`;
     }).join('\n') + `\nfile '${imageFiles[imageFiles.length - 1]}'\n`;
     await fs.writeFile(inputListPath, inputListContent);
     
@@ -202,22 +257,23 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     // Ken Burns zoom effect - reduced scale from 2x to 1.5x for faster processing
     const UPSCALE_FACTOR = 1.5; // 1.5x is sufficient for smooth zoompan, 2x was overkill
     const kenBurnsFilter = scenes.map((_, i) => {
+      const dur = sceneDurations[i];
       const zoomIn = i % 2 === 0;
       const zoomStart = zoomIn ? 1.0 : 1.15;
       const zoomEnd = zoomIn ? 1.15 : 1.0;
       const scaledWidth = Math.round(outputWidth * UPSCALE_FACTOR);
       const scaledHeight = Math.round(outputHeight * UPSCALE_FACTOR);
-      return `[${i}:v]scale=${scaledWidth}:${scaledHeight},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${sceneDuration * fps}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${sceneDuration * fps}:s=${outputWidth}x${outputHeight}:fps=${fps}[v${i}]`;
+      return `[${i}:v]scale=${scaledWidth}:${scaledHeight},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${dur * fps}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${dur * fps}:s=${outputWidth}x${outputHeight}:fps=${fps}[v${i}]`;
     }).join(';');
     
     const concatInputs = scenes.map((_, i) => `[v${i}]`).join('');
     const complexFilter = `${kenBurnsFilter};${concatInputs}concat=n=${scenes.length}:v=1:a=0[outv]`;
     
-    console.log(`[Renderer] Building silent video with ${scenes.length} scenes (${UPSCALE_FACTOR}x upscale, veryfast preset)`);
+    console.log(`[Renderer] Building silent video with ${scenes.length} scenes (${UPSCALE_FACTOR}x upscale, veryfast preset), total duration: ${totalDuration.toFixed(1)}s`);
     
     const ffmpegArgs = [
       '-y',
-      ...imageFiles.flatMap(f => ['-loop', '1', '-t', String(sceneDuration), '-i', f]),
+      ...imageFiles.flatMap((f, i) => ['-loop', '1', '-t', String(sceneDurations[i]), '-i', f]),
       '-filter_complex', complexFilter,
       '-map', '[outv]',
       '-c:v', 'libx264',
@@ -273,7 +329,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const withSubtitlesPath = path.join(tempDir, 'final_with_subtitles.mp4');
       
       const assPath = path.join(tempDir, 'subtitles.ass');
-      const assContent = generateAssSubtitles(scenes, sceneDuration, subtitleSettings, outputWidth, outputHeight);
+      const assContent = generateAssSubtitles(scenes, sceneDurations, subtitleSettings, outputWidth, outputHeight);
       await fs.writeFile(assPath, assContent);
       
       console.log(`[Renderer] Burning subtitles into video`);
@@ -342,7 +398,7 @@ async function createPlaceholderImage(path: string, width: number, height: numbe
 
 function generateAssSubtitles(
   scenes: Scene[], 
-  sceneDuration: number, 
+  sceneDurations: number[], 
   settings: SubtitleSettings,
   width: number,
   height: number
@@ -370,20 +426,20 @@ Style: Default,Arial,${fontSize},${primaryColor},${primaryColor},${outlineColor}
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
+  let currentTime = 0;
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i];
     const text = scene.textOverlay || '';
-    if (!text.trim()) continue;
+    const dur = sceneDurations[i] || 5;
     
-    const startTime = i * sceneDuration;
-    const endTime = (i + 1) * sceneDuration;
+    if (text.trim()) {
+      const startFormatted = formatAssTime(currentTime);
+      const endFormatted = formatAssTime(currentTime + dur);
+      const escapedText = text.replace(/\n/g, '\\N').replace(/,/g, '\\,');
+      ass += `Dialogue: 0,${startFormatted},${endFormatted},Default,,0,0,0,,${escapedText}\n`;
+    }
     
-    const startFormatted = formatAssTime(startTime);
-    const endFormatted = formatAssTime(endTime);
-    
-    const escapedText = text.replace(/\n/g, '\\N').replace(/,/g, '\\,');
-    
-    ass += `Dialogue: 0,${startFormatted},${endFormatted},Default,,0,0,0,,${escapedText}\n`;
+    currentTime += dur;
   }
   
   return ass;

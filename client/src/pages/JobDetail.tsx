@@ -79,15 +79,26 @@ export default function JobDetail() {
   // Mutation for sending edit messages
   const sendEditMutation = useMutation({
     mutationFn: async (message: string) => {
-      return apiRequest("POST", `/api/jobs/${id}/edits`, { message });
+      const response = await apiRequest("POST", `/api/jobs/${id}/edits`, { message });
+      return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setEditMessage("");
       refetchEdits();
-      toast({
-        title: "Message sent",
-        description: "The assistant is processing your request."
-      });
+      
+      // Immediately update cache with full job if changes were applied
+      if (data.updatedJob) {
+        queryClient.setQueryData<JobWithSteps>(["/api/jobs", id], data.updatedJob);
+        toast({
+          title: "Changes applied",
+          description: "Your caption and hashtags have been updated."
+        });
+      } else {
+        toast({
+          title: "Message sent",
+          description: "The assistant has responded."
+        });
+      }
     },
     onError: (error) => {
       toast({
@@ -138,7 +149,7 @@ export default function JobDetail() {
   const isActive = ['running', 'generating_script', 'generating_assets', 'rendering_video', 'generating_caption'].includes(job.status);
   const isCompleted = job.status === 'completed';
   const isFailed = job.status === 'failed';
-  const settings = job.settings as JobSettings;
+  const settings = (job.settings || {}) as JobSettings;
 
   return (
     <div className="p-6 lg:p-8 max-w-6xl mx-auto" data-testid="job-detail-page">

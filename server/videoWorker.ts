@@ -2,7 +2,7 @@
 import { storage } from "./storage";
 import { generateScript, generateImagePrompt, generateImage, generateCaptionAndHashtags, generateSpeech, type TTSVoice, DUMMY_MODE } from "./ai";
 import { objectStorageService } from "./objectStorage";
-import { renderVideo, checkVideoIntegrity } from "./videoRenderer";
+import { renderVideo, checkVideoIntegrity, getAudioDuration } from "./videoRenderer";
 import type { Job, JobStep, JobSettings, ContentType, Scene, JobStatus, StepStatus } from "@shared/schema";
 import { randomUUID } from "crypto";
 import crypto from "crypto";
@@ -327,7 +327,57 @@ export async function processJob(jobId: string): Promise<void> {
           await storage.updateLastProgress(jobId);
         }
         
-        console.log(`[Worker] Audio assets complete: ${totalScenes} voiceovers processed`);
+        // After all audio is generated, detect durations and recalculate scene timings
+        console.log(`[Worker] Detecting audio durations and recalculating scene timings...`);
+        let currentTime = 0;
+        let consecutiveFailures = 0;
+        const MAX_CONSECUTIVE_FAILURES = 3; // Fail only on consecutive failures
+        const fs = await import('fs/promises');
+        
+        for (let i = 0; i < updatedScenes.length; i++) {
+          const scene = updatedScenes[i];
+          
+          // Detect audio duration if scene has audio
+          if (scene.audioAssetUrl) {
+            const tempPath = `/tmp/audio_check_${jobId}_${i}.mp3`;
+            try {
+              // Download audio to temp file to get duration
+              const audioFile = await objectStorageService.getObjectEntityFile(scene.audioAssetUrl);
+              const [audioContents] = await audioFile.download();
+              await fs.writeFile(tempPath, audioContents);
+              const duration = await getAudioDuration(tempPath);
+              updatedScenes[i].audioDurationSeconds = duration;
+              consecutiveFailures = 0; // Reset on success
+              console.log(`[Worker]   Scene ${i + 1}: audio duration ${duration.toFixed(1)}s`);
+            } catch (err) {
+              consecutiveFailures++;
+              console.error(`[Worker]   Scene ${i + 1}: Failed to detect duration (consecutive: ${consecutiveFailures}):`, err);
+              
+              if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                throw new Error(`${MAX_CONSECUTIVE_FAILURES} consecutive audio duration detection failures. Aborting to prevent A/V desync.`);
+              }
+              
+              // Fall back to reasonable estimate based on text length
+              const estimatedDuration = Math.max(3, Math.min(10, (scene.textOverlay?.length || 50) / 15));
+              console.log(`[Worker]   Scene ${i + 1}: Using estimated duration ${estimatedDuration.toFixed(1)}s based on text length`);
+              updatedScenes[i].audioDurationSeconds = estimatedDuration;
+            } finally {
+              // Always clean up temp file (even if it doesn't exist)
+              await fs.unlink(tempPath).catch(() => {});
+            }
+          } else {
+            // No audio, use 3s default for visual-only scenes
+            updatedScenes[i].audioDurationSeconds = 3;
+          }
+          
+          // Recalculate scene start/end times based on actual durations
+          const duration = updatedScenes[i].audioDurationSeconds || 5;
+          updatedScenes[i].startTime = currentTime;
+          updatedScenes[i].endTime = currentTime + duration;
+          currentTime += duration;
+        }
+        
+        console.log(`[Worker] Audio assets complete: ${totalScenes} voiceovers processed, total duration: ${currentTime.toFixed(1)}s`);
         context.scenes = updatedScenes;
         await storage.updateJob(jobId, { scenes: updatedScenes });
       }

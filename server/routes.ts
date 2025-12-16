@@ -6,7 +6,7 @@ import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes, contentTypes } from "@shared/schema";
 import type { ContentType } from "@shared/schema";
-import { suggestTrendingTopics, processEditCommand } from "./ai";
+import { suggestTrendingTopics, processEditCommand, regenerateCaptionWithFeedback } from "./ai";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 
@@ -320,19 +320,61 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         contentType: job.contentType
       });
 
-      // Save AI response
+      // Execute commands that can be applied immediately
+      let updatedCaption = job.caption;
+      let updatedHashtags = job.hashtags;
+      const appliedChanges: string[] = [];
+
+      for (const command of aiResult.commands) {
+        if (command.action === 'regenerate_caption' || command.action === 'update_caption') {
+          // Regenerate caption with user feedback
+          try {
+            const result = await regenerateCaptionWithFeedback(
+              job.contentType as ContentType,
+              job.scriptText || '',
+              job.caption || undefined,
+              job.hashtags || undefined,
+              message
+            );
+            updatedCaption = result.caption;
+            updatedHashtags = result.hashtags;
+            appliedChanges.push('caption and hashtags updated');
+          } catch (err) {
+            console.error('Failed to regenerate caption:', err);
+          }
+        }
+      }
+
+      // Apply changes to job if any commands were executed
+      if (appliedChanges.length > 0) {
+        await storage.updateJob(jobId, {
+          caption: updatedCaption,
+          hashtags: updatedHashtags
+        });
+      }
+
+      // Save AI response with applied changes note
+      const responseMessage = appliedChanges.length > 0
+        ? `${aiResult.response}\n\n[Changes applied: ${appliedChanges.join(', ')}]`
+        : aiResult.response;
+
       const assistantEdit = await storage.createJobEdit({
         jobId,
         role: 'assistant',
-        message: aiResult.response,
+        message: responseMessage,
         editCommand: aiResult.commands.length > 0 ? aiResult.commands : null,
         affectedStages: aiResult.commands.map(c => c.targetStage).filter(Boolean) as string[]
       });
 
+      // Get the full updated job for the response
+      const updatedJob = appliedChanges.length > 0 ? await storage.getJob(jobId) : null;
+
       res.status(201).json({
         userMessage: userEdit,
         assistantResponse: assistantEdit,
-        commands: aiResult.commands
+        commands: aiResult.commands,
+        appliedChanges,
+        updatedJob
       });
     } catch (error) {
       console.error("Error processing edit:", error);
