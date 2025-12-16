@@ -218,7 +218,7 @@ export default function Presets() {
         </div>
       ) : presets && presets.length > 0 ? (
         <div className="space-y-8">
-          {Object.entries(presetsByType).map(([type, typePresets]) => (
+          {(Object.entries(presetsByType) as [ContentType, Preset[]][]).map(([type, typePresets]) => (
             <div key={type}>
               <div className="flex items-center gap-2 mb-4">
                 <ContentTypeIcon contentType={type as ContentType} className="w-5 h-5" />

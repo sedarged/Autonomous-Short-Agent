@@ -142,6 +142,12 @@ export const jobs = pgTable("jobs", {
   progressPercent: integer("progress_percent").notNull().default(0),
   etaSeconds: integer("eta_seconds"),
   errorMessage: text("error_message"),
+  // Locking/leasing fields for preventing double-processing
+  lockedBy: text("locked_by"),
+  lockedAt: timestamp("locked_at"),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  lastProgressAt: timestamp("last_progress_at"),
+  cancelRequested: boolean("cancel_requested").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow()
 });
@@ -154,7 +160,9 @@ export const jobSteps = pgTable("job_steps", {
   status: text("status").notNull().default('queued'),
   message: text("message"),
   startedAt: timestamp("started_at"),
-  finishedAt: timestamp("finished_at")
+  finishedAt: timestamp("finished_at"),
+  etaSeconds: integer("eta_seconds"),
+  durationMs: integer("duration_ms")
 });
 
 // Assets table

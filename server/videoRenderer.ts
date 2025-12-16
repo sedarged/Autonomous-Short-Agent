@@ -6,6 +6,9 @@ import { objectStorageService, objectStorageClient } from './objectStorage';
 import type { Scene, JobSettings, VisualSettings, SubtitleSettings } from '@shared/schema';
 
 const TEMP_DIR = '/tmp/video-render';
+const DEFAULT_WIDTH = 1080;
+const DEFAULT_HEIGHT = 1920;
+const DEFAULT_FPS = 30;
 
 interface RenderOptions {
   jobId: string;
@@ -15,10 +18,79 @@ interface RenderOptions {
   outputHeight?: number;
 }
 
+interface IntegrityCheck {
+  valid: boolean;
+  error?: string;
+  duration?: number;
+  hasAudio?: boolean;
+  width?: number;
+  height?: number;
+}
+
 interface RenderResult {
   videoUrl: string;
   thumbnailUrl: string;
   durationSeconds: number;
+  integrityCheck: IntegrityCheck;
+}
+
+// Check video integrity using ffprobe
+export async function checkVideoIntegrity(videoPath: string): Promise<IntegrityCheck> {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration:stream=codec_type,width,height',
+      '-of', 'json',
+      videoPath
+    ]);
+    
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => stdout += d);
+    proc.stderr.on('data', d => stderr += d);
+    
+    proc.on('close', code => {
+      if (code !== 0) {
+        return resolve({ valid: false, error: `ffprobe failed: ${stderr.slice(0, 200)}` });
+      }
+      
+      try {
+        const data = JSON.parse(stdout);
+        const duration = parseFloat(data.format?.duration || '0');
+        const streams = data.streams || [];
+        const hasAudio = streams.some((s: any) => s.codec_type === 'audio');
+        const videoStream = streams.find((s: any) => s.codec_type === 'video');
+        
+        if (duration <= 0) {
+          return resolve({ valid: false, error: 'No duration detected' });
+        }
+        
+        // Check file size (must be > 10KB to be valid)
+        fs.stat(videoPath).then(stats => {
+          if (stats.size < 10000) {
+            return resolve({ valid: false, error: 'File too small' });
+          }
+          
+          resolve({ 
+            valid: true, 
+            duration,
+            hasAudio,
+            width: videoStream?.width,
+            height: videoStream?.height
+          });
+        }).catch(() => {
+          resolve({ valid: false, error: 'Cannot stat file' });
+        });
+        
+      } catch (e) {
+        resolve({ valid: false, error: 'Failed to parse ffprobe output' });
+      }
+    });
+    
+    proc.on('error', (err) => {
+      resolve({ valid: false, error: `ffprobe error: ${err.message}` });
+    });
+  });
 }
 
 async function ensureTempDir(jobId: string): Promise<string> {
@@ -74,11 +146,12 @@ function runFFmpeg(args: string[]): Promise<void> {
 
 export async function renderVideo(options: RenderOptions): Promise<RenderResult> {
   const { jobId, scenes, settings } = options;
-  const outputWidth = options.outputWidth || 1080;
-  const outputHeight = options.outputHeight || 1920;
+  const outputWidth = options.outputWidth || DEFAULT_WIDTH;
+  const outputHeight = options.outputHeight || DEFAULT_HEIGHT;
+  const fps = DEFAULT_FPS;
   
   const tempDir = await ensureTempDir(jobId);
-  console.log(`[Renderer] Starting render for job ${jobId} with ${scenes.length} scenes`);
+  console.log(`[Renderer] Starting render for job ${jobId} with ${scenes.length} scenes at ${fps}fps`);
   
   try {
     const sceneDuration = 5;
@@ -130,7 +203,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const zoomIn = i % 2 === 0;
       const zoomStart = zoomIn ? 1.0 : 1.15;
       const zoomEnd = zoomIn ? 1.15 : 1.0;
-      return `[${i}:v]scale=${outputWidth * 2}:${outputHeight * 2},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${sceneDuration * 25}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${sceneDuration * 25}:s=${outputWidth}x${outputHeight}:fps=25[v${i}]`;
+      return `[${i}:v]scale=${outputWidth * 2}:${outputHeight * 2},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${sceneDuration * fps}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${sceneDuration * fps}:s=${outputWidth}x${outputHeight}:fps=${fps}[v${i}]`;
     }).join(';');
     
     const concatInputs = scenes.map((_, i) => `[v${i}]`).join('');
@@ -145,7 +218,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       '-preset', 'fast',
       '-crf', '23',
       '-pix_fmt', 'yuv420p',
-      '-r', '25',
+      '-r', String(fps),
       silentVideoPath
     ];
     
@@ -224,14 +297,18 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     const thumbnailFilename = `${jobId}/thumbnail.jpg`;
     const thumbnailUrl = await objectStorageService.uploadBuffer(thumbnailBuffer, 'image/jpeg', thumbnailFilename);
     
+    // Check video integrity before declaring success
+    const integrityCheck = await checkVideoIntegrity(finalVideoPath);
+    
     await cleanupTempDir(jobId);
     
-    console.log(`[Renderer] Completed render for job ${jobId}`);
+    console.log(`[Renderer] Completed render for job ${jobId} - integrity: ${integrityCheck.valid}`);
     
     return {
       videoUrl,
       thumbnailUrl,
-      durationSeconds: totalDuration
+      durationSeconds: totalDuration,
+      integrityCheck
     };
     
   } catch (error) {

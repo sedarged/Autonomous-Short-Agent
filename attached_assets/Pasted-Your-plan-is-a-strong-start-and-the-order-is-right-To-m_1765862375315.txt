@@ -1,0 +1,118 @@
+Your plan is a strong start and the order is right. To make it “best possible ever” (reliable, no cost leaks, no double-processing, no “completed but broken MP4”), please modify your plan by adding the missing engineering guardrails below. Keep your existing steps, just expand them into this upgraded step-by-step plan:
+
+## Upgraded Plan (Replace your list with this)
+
+1) **Update rules files for project**
+   - Update `replit.md` as the PRIMARY project memory:
+     - Design Freeze: must follow `design_guidelines.md` (no redesign unless broken/missing)
+     - No Stock Footage rule
+     - Definition of Done (verify + playable MP4 + live progress/ETA/logs)
+     - Correct run commands + env/secrets names
+   - Create `.replit_agent_rules.md` with: batch work, self-repair, verify required, no stock footage.
+
+2) **Create audit report with issues**
+   - Must include: repo architecture map, worker flow, renderer flow, storage sidecar usage, DB schema usage, gap analysis, reliability risks (restart/queue), cost leaks, ffmpeg risks (fps/subtitles/temp cleanup), security risks (zod + SSRF if URL fetch).
+
+3) **Create build plan for execution**
+   - Must include: phases + exact files to change + exact commands + verification criteria per phase.
+   - No “big refactors”; minimal diffs only.
+
+4) **Implement scripts to test jobs**
+   - Create `scripts/verify.ts` (or .mjs) that runs “golden jobs” end-to-end.
+
+5) **Add script commands to package**
+   - Add: `typecheck`, `verify` (and `lint` if available).
+
+6) **Add Dummy Mode for tests (IMPORTANT)**
+   - Verification must run without paid AI calls:
+     - deterministic script output
+     - placeholder images/audio
+     - still renders a valid MP4
+   - `npm run verify` must use dummy mode by default.
+
+7) **Fix job steps creation timing**
+   - Create all `job_steps` immediately when a job is created (queued state), not only when the worker starts.
+   - This guarantees the UI stepper is consistent from the start.
+
+8) **Add job locking / leasing (NEW — prevents double-processing)**
+   - Add DB lease fields: `lockedBy`, `lockedAt`, `leaseExpiresAt`, `lastProgressAt`.
+   - Worker must acquire + renew lease while running.
+   - Only one worker/loop may process a job at a time.
+
+9) **Add idempotency + deterministic asset keys (NEW — prevents cost leaks)**
+   - Every step must be idempotent:
+     - if output already exists in DB/storage, skip/resume without regenerating.
+   - Use hash-based asset paths:
+     - `jobs/{jobId}/images/scene_{i}_{hash}.png`
+     - `jobs/{jobId}/audio/voice_{hash}.mp3`
+     - `jobs/{jobId}/subs/subs_{hash}.ass`
+     - `jobs/{jobId}/video/final_{hash}.mp4`
+
+10) **Centralize retries + rate limits (NEW)**
+   - All provider calls go through one wrapper:
+     - p-limit concurrency caps
+     - p-retry exponential backoff
+     - retryable vs non-retryable classification
+   - Write retry events into step logs (so UI shows them).
+
+11) **Track step times for ETA (UPGRADE ETA)**
+   - Persist rolling averages per step per contentType in DB settings.
+   - ETA must use “work units”:
+     - visuals ETA = avg_per_image * image_count
+     - TTS ETA = avg_per_char * script_length
+     - render ETA = avg_per_second * duration_seconds
+   - Update `etaSeconds` frequently during steps (not only step boundaries).
+
+12) **Resume jobs after server restart (SAFE)**
+   - On boot: find queued/running/generating_* jobs and re-enqueue safely.
+   - Must use locking + idempotency to avoid duplicates.
+
+13) **Handle stuck jobs + add cancel (UPGRADE)**
+   - If `lastProgressAt` too old: retry step or fail cleanly with reason.
+   - Add `POST /api/jobs/:id/cancel` and have worker check cancel flag between steps.
+   - Always clean temp files on fail/cancel.
+
+14) **Handle stuck jobs, set FPS (UPGRADE RENDERING)**
+   - Standardize default output to: **1080x1920, 30fps** (unless configured).
+   - Add MP4 integrity checks before marking completed:
+     - file exists, size > threshold
+     - ffprobe duration > 0
+     - audio stream exists
+     - resolution correct
+   - If integrity fails: mark failed + preserve logs (do NOT mark completed).
+
+15) **Show job details in UI**
+   - Must include:
+     - stepper timeline + per-step status + per-step ETA
+     - global progress + ETA
+     - expandable step logs
+     - lastUpdated timestamp + polling indicator
+     - MP4 preview + download
+     - regenerate full job (optional: regenerate step)
+
+16) **Show jobs on dashboard UI**
+   - Jobs table must include:
+     - status, progress bar, ETA, lastUpdated, filters (contentType/status)
+
+17) **Verify all features work correctly (MAKE THIS STRICT)**
+   - `npm run verify` must create at least 3 golden jobs:
+     - facts (5 items, CHEAP)
+     - would_you_rather (5 questions, CHEAP)
+     - short_story_generic OR reddit_story(raw_text) (CHEAP)
+   - Assertions:
+     - job_steps exist immediately
+     - progress increases over time
+     - eta updates over time
+     - MP4 passes integrity checks + is playable
+     - caption + hashtags non-empty
+   - Exit non-zero on any failure.
+
+## Definition of Done (you may not claim “done” unless all true)
+- `npm run typecheck` passes
+- `npm run verify` passes
+- real MP4 previews in UI
+- progress/ETA/logs update live while running
+- restart/resume works without double-processing
+- no stock footage usage anywhere
+
+Please update `BUILD_PLAN.md` to include the above, with exact file touch points + commands + verification per phase, then proceed phase-by-phase.

@@ -7,6 +7,9 @@ import pRetry, { AbortError } from "p-retry";
 import type { ContentType, JobSettings, Scene } from "@shared/schema";
 import { contentTypeInfo, premiumContentTypes } from "@shared/schema";
 
+// Dummy mode for testing without AI costs
+export const DUMMY_MODE = process.env.DUMMY_MODE === 'true';
+
 // Tiered model strategy for cost optimization
 // Premium model for creative content that requires high quality
 const PREMIUM_MODEL = "gpt-5";
@@ -43,6 +46,11 @@ export async function generateScript(
   contentType: ContentType,
   config: Record<string, any>
 ): Promise<{ script: string; scenes: Scene[] }> {
+  // Dummy mode: return deterministic content
+  if (DUMMY_MODE) {
+    return getDummyScript(contentType, config);
+  }
+
   const info = contentTypeInfo[contentType];
   const prompt = config.prompt || "";
   
@@ -92,6 +100,11 @@ export async function generateImagePrompt(
   stylePrompt?: string,
   contentType?: ContentType
 ): Promise<string> {
+  // Dummy mode: return deterministic prompt
+  if (DUMMY_MODE) {
+    return `Test image for: ${(scene.textOverlay || scene.voiceSegmentText || 'scene').slice(0, 50)}`;
+  }
+
   const response = await pRetry(
     async () => {
       try {
@@ -130,6 +143,20 @@ export async function generateImagePrompt(
 
 // Generate image using DALL-E/gpt-image-1
 export async function generateImage(prompt: string): Promise<Buffer> {
+  // Dummy mode: return a small placeholder image (1x1 pixel PNG)
+  if (DUMMY_MODE) {
+    // Simple 100x100 solid color PNG (minimal valid PNG)
+    const canvas = Buffer.alloc(100 * 100 * 4);
+    for (let i = 0; i < 100 * 100; i++) {
+      canvas[i * 4] = 30;     // R
+      canvas[i * 4 + 1] = 30; // G
+      canvas[i * 4 + 2] = 50; // B
+      canvas[i * 4 + 3] = 255; // A
+    }
+    // Return minimal placeholder - renderer will create proper placeholder
+    return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  }
+
   const response = await pRetry(
     async () => {
       try {
@@ -147,7 +174,7 @@ export async function generateImage(prompt: string): Promise<Buffer> {
     { retries: 3, minTimeout: 2000 }
   );
 
-  const base64 = response.data[0]?.b64_json ?? "";
+  const base64 = response.data?.[0]?.b64_json ?? "";
   return Buffer.from(base64, "base64");
 }
 
@@ -160,6 +187,12 @@ export async function generateSpeech(
   text: string,
   voice: TTSVoice = 'nova'
 ): Promise<Buffer> {
+  // Dummy mode: return minimal MP3 (silence)
+  if (DUMMY_MODE) {
+    // Minimal valid MP3 file (silence)
+    return Buffer.from('//uQxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV', 'base64');
+  }
+
   const response = await pRetry(
     async () => {
       try {
@@ -187,6 +220,14 @@ export async function generateCaptionAndHashtags(
   contentType: ContentType,
   script: string
 ): Promise<{ caption: string; hashtags: string[] }> {
+  // Dummy mode: return deterministic caption
+  if (DUMMY_MODE) {
+    return {
+      caption: `Test ${contentTypeInfo[contentType].label} video - Check this out!`,
+      hashtags: ['test', 'video', contentType.replace(/_/g, ''), 'shorts', 'viral']
+    };
+  }
+
   const response = await pRetry(
     async () => {
       try {
@@ -398,6 +439,48 @@ function buildScenes(parsed: any, contentType: ContentType): Scene[] {
   }
 
   return scenes;
+}
+
+// Dummy script generator for testing
+function getDummyScript(contentType: ContentType, config: Record<string, any>): { script: string; scenes: Scene[] } {
+  const count = config.count || 5;
+  const segments: string[] = [];
+  
+  switch (contentType) {
+    case 'facts':
+      for (let i = 1; i <= count; i++) {
+        segments.push(`Fact ${i}: This is an interesting test fact about the world.`);
+      }
+      break;
+    case 'would_you_rather':
+      for (let i = 1; i <= count; i++) {
+        segments.push(`Would you rather have option A or option B? Question ${i}.`);
+      }
+      break;
+    case 'short_story_generic':
+    case 'reddit_story':
+      segments.push("This is the beginning of a test story.");
+      segments.push("Something interesting happens in the middle.");
+      segments.push("The story reaches its climax here.");
+      segments.push("And this is how it all ends.");
+      break;
+    default:
+      for (let i = 1; i <= Math.min(count, 5); i++) {
+        segments.push(`Test segment ${i} for ${contentTypeInfo[contentType].label} content.`);
+      }
+  }
+  
+  const script = segments.join(' ');
+  const scenes: Scene[] = segments.map((text, i) => ({
+    id: `scene-${i + 1}`,
+    index: i,
+    startTime: i * 5,
+    endTime: (i + 1) * 5,
+    textOverlay: text.slice(0, 100),
+    voiceSegmentText: text
+  }));
+  
+  return { script, scenes };
 }
 
 export { openai };

@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { enqueueJob } from "./videoWorker";
+import { enqueueJob, initializeJobSteps } from "./videoWorker";
 import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
 import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes } from "@shared/schema";
@@ -69,10 +69,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         progressPercent: 0
       });
 
+      // Initialize job steps immediately (so UI shows stepper from start)
+      await initializeJobSteps(job.id);
+
       // Enqueue for processing
       enqueueJob(job.id);
 
-      res.status(201).json(job);
+      // Refetch job with steps
+      const jobWithSteps = await storage.getJob(job.id);
+      res.status(201).json(jobWithSteps);
     } catch (error) {
       console.error("Error creating job:", error);
       res.status(500).json({ error: "Failed to create job" });
@@ -98,10 +103,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         progressPercent: 0
       });
 
+      // Initialize job steps immediately
+      await initializeJobSteps(newJob.id);
+
       // Enqueue for processing
       enqueueJob(newJob.id);
 
-      res.status(201).json(newJob);
+      // Refetch job with steps
+      const jobWithSteps = await storage.getJob(newJob.id);
+      res.status(201).json(jobWithSteps);
     } catch (error) {
       console.error("Error regenerating job:", error);
       res.status(500).json({ error: "Failed to regenerate job" });
@@ -122,6 +132,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error deleting job:", error);
       res.status(500).json({ error: "Failed to delete job" });
+    }
+  });
+
+  // Cancel job
+  app.post("/api/jobs/:id/cancel", async (req: Request, res: Response) => {
+    try {
+      const job = await storage.getJob(req.params.id);
+      
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      // Can only cancel jobs that are not already completed or failed
+      if (job.status === 'completed' || job.status === 'failed') {
+        return res.status(400).json({ error: "Cannot cancel completed or failed job" });
+      }
+
+      await storage.updateJob(req.params.id, { cancelRequested: true });
+      res.json({ success: true, message: "Cancel requested" });
+    } catch (error) {
+      console.error("Error cancelling job:", error);
+      res.status(500).json({ error: "Failed to cancel job" });
     }
   });
 

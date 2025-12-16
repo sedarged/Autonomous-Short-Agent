@@ -19,7 +19,7 @@ import {
   type StepStatus
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, or, lt, isNull, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Jobs
@@ -28,6 +28,13 @@ export interface IStorage {
   createJob(job: InsertJob): Promise<Job>;
   updateJob(id: string, updates: Partial<Job>): Promise<Job | undefined>;
   deleteJob(id: string): Promise<void>;
+  getJobsByStatuses(statuses: string[]): Promise<JobWithSteps[]>;
+
+  // Job Locking
+  acquireJobLock(jobId: string, workerId: string, leaseSeconds: number): Promise<boolean>;
+  renewJobLease(jobId: string, workerId: string, leaseSeconds: number): Promise<boolean>;
+  releaseJobLock(jobId: string, workerId: string): Promise<void>;
+  updateLastProgress(jobId: string): Promise<void>;
 
   // Job Steps
   getJobSteps(jobId: string): Promise<JobStep[]>;
@@ -36,6 +43,7 @@ export interface IStorage {
 
   // Assets
   getAssets(jobId: string): Promise<Asset[]>;
+  getAssetByPath(jobId: string, path: string): Promise<Asset | undefined>;
   createAsset(asset: InsertAsset): Promise<Asset>;
 
   // Presets
@@ -111,6 +119,80 @@ export class DatabaseStorage implements IStorage {
     await db.delete(jobs).where(eq(jobs.id, id));
   }
 
+  async getJobsByStatuses(statuses: string[]): Promise<JobWithSteps[]> {
+    if (statuses.length === 0) return [];
+    
+    const jobsResult = await db
+      .select()
+      .from(jobs)
+      .where(inArray(jobs.status, statuses))
+      .orderBy(desc(jobs.createdAt));
+
+    const jobsWithSteps: JobWithSteps[] = await Promise.all(
+      jobsResult.map(async (job) => {
+        const steps = await this.getJobSteps(job.id);
+        return { ...job, steps };
+      })
+    );
+
+    return jobsWithSteps;
+  }
+
+  // Job Locking
+  async acquireJobLock(jobId: string, workerId: string, leaseSeconds: number): Promise<boolean> {
+    const now = new Date();
+    const leaseExpiry = new Date(now.getTime() + leaseSeconds * 1000);
+    
+    // Try to acquire lock: either no lock, or expired lock
+    const result = await db
+      .update(jobs)
+      .set({ 
+        lockedBy: workerId, 
+        lockedAt: now, 
+        leaseExpiresAt: leaseExpiry,
+        lastProgressAt: now
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          or(
+            isNull(jobs.lockedBy),
+            lt(jobs.leaseExpiresAt, now)
+          )
+        )
+      )
+      .returning();
+    
+    return result.length > 0;
+  }
+
+  async renewJobLease(jobId: string, workerId: string, leaseSeconds: number): Promise<boolean> {
+    const now = new Date();
+    const leaseExpiry = new Date(now.getTime() + leaseSeconds * 1000);
+    
+    const result = await db
+      .update(jobs)
+      .set({ leaseExpiresAt: leaseExpiry, lastProgressAt: now })
+      .where(and(eq(jobs.id, jobId), eq(jobs.lockedBy, workerId)))
+      .returning();
+    
+    return result.length > 0;
+  }
+
+  async releaseJobLock(jobId: string, workerId: string): Promise<void> {
+    await db
+      .update(jobs)
+      .set({ lockedBy: null, lockedAt: null, leaseExpiresAt: null })
+      .where(and(eq(jobs.id, jobId), eq(jobs.lockedBy, workerId)));
+  }
+
+  async updateLastProgress(jobId: string): Promise<void> {
+    await db
+      .update(jobs)
+      .set({ lastProgressAt: new Date(), updatedAt: new Date() })
+      .where(eq(jobs.id, jobId));
+  }
+
   // Job Steps
   async getJobSteps(jobId: string): Promise<JobStep[]> {
     return db.select().from(jobSteps).where(eq(jobSteps.jobId, jobId));
@@ -133,6 +215,14 @@ export class DatabaseStorage implements IStorage {
   // Assets
   async getAssets(jobId: string): Promise<Asset[]> {
     return db.select().from(assets).where(eq(assets.jobId, jobId));
+  }
+
+  async getAssetByPath(jobId: string, path: string): Promise<Asset | undefined> {
+    const [asset] = await db
+      .select()
+      .from(assets)
+      .where(and(eq(assets.jobId, jobId), eq(assets.url, path)));
+    return asset;
   }
 
   async createAsset(asset: InsertAsset): Promise<Asset> {

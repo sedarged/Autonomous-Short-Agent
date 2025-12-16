@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { resumeJobsOnStartup } from "./videoWorker";
 
 const app = express();
 const httpServer = createServer(app);
@@ -91,8 +92,15 @@ app.use((req, res, next) => {
       host: "0.0.0.0",
       reusePort: true,
     },
-    () => {
+    async () => {
       log(`serving on port ${port}`);
+      
+      // Resume any jobs that were interrupted by server restart
+      try {
+        await resumeJobsOnStartup();
+      } catch (err) {
+        console.error("Failed to resume jobs on startup:", err);
+      }
     },
   );
 })();
