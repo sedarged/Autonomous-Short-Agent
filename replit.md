@@ -54,7 +54,8 @@ Narrative (Reddit stories, horror, fiction), Interactive (would-you-rather, quiz
 
 ### Database
 - **PostgreSQL**: Primary data store via `DATABASE_URL` environment variable
-- **Drizzle ORM**: Schema management and type-safe queries
+- **Drizzle ORM**: Schema management and type-
+- safe queries
 
 ### File Storage
 - **Replit Object Storage**: Google Cloud Storage compatible service for generated video assets and thumbnails
