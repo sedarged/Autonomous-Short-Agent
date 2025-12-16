@@ -3,7 +3,7 @@
 
 import OpenAI from "openai";
 import pLimit from "p-limit";
-import pRetry from "p-retry";
+import pRetry, { AbortError } from "p-retry";
 import type { ContentType, JobSettings, Scene } from "@shared/schema";
 import { contentTypeInfo } from "@shared/schema";
 
@@ -58,7 +58,7 @@ export async function generateScript(
         if (isRateLimitError(error)) {
           throw error;
         }
-        throw new pRetry.AbortError(error);
+        throw new AbortError(error);
       }
     },
     {
@@ -109,7 +109,7 @@ export async function generateImagePrompt(
         return result;
       } catch (error: any) {
         if (isRateLimitError(error)) throw error;
-        throw new pRetry.AbortError(error);
+        throw new AbortError(error);
       }
     },
     { retries: 3, minTimeout: 1000 }
@@ -133,7 +133,7 @@ export async function generateImage(prompt: string): Promise<Buffer> {
         return result;
       } catch (error: any) {
         if (isRateLimitError(error)) throw error;
-        throw new pRetry.AbortError(error);
+        throw new AbortError(error);
       }
     },
     { retries: 3, minTimeout: 2000 }
@@ -141,6 +141,37 @@ export async function generateImage(prompt: string): Promise<Buffer> {
 
   const base64 = response.data[0]?.b64_json ?? "";
   return Buffer.from(base64, "base64");
+}
+
+// Text-to-Speech voices available in OpenAI
+export const TTS_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+export type TTSVoice = typeof TTS_VOICES[number];
+
+// Generate speech from text using OpenAI TTS
+export async function generateSpeech(
+  text: string,
+  voice: TTSVoice = 'nova'
+): Promise<Buffer> {
+  const response = await pRetry(
+    async () => {
+      try {
+        const result = await openai.audio.speech.create({
+          model: "tts-1",
+          voice,
+          input: text,
+          response_format: "mp3"
+        });
+        return result;
+      } catch (error: any) {
+        if (isRateLimitError(error)) throw error;
+        throw new AbortError(error);
+      }
+    },
+    { retries: 3, minTimeout: 2000 }
+  );
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 // Generate caption and hashtags
@@ -173,7 +204,7 @@ export async function generateCaptionAndHashtags(
         return result;
       } catch (error: any) {
         if (isRateLimitError(error)) throw error;
-        throw new pRetry.AbortError(error);
+        throw new AbortError(error);
       }
     },
     { retries: 3, minTimeout: 1000 }

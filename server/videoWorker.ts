@@ -1,7 +1,8 @@
 // Video Generation Worker - Background processing for video jobs
 import { storage } from "./storage";
-import { generateScript, generateImagePrompt, generateImage, generateCaptionAndHashtags } from "./ai";
+import { generateScript, generateImagePrompt, generateImage, generateCaptionAndHashtags, generateSpeech, type TTSVoice } from "./ai";
 import { objectStorageService } from "./objectStorage";
+import { renderVideo } from "./videoRenderer";
 import type { Job, JobStep, JobSettings, ContentType, Scene, JobStatus, StepStatus } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -107,46 +108,95 @@ export async function processJob(jobId: string): Promise<void> {
       }
     });
 
-    // Step 3: Generate Audio Assets (TTS placeholder - would need external TTS API)
+    // Step 3: Generate Audio Assets (TTS using OpenAI)
     await runStep(jobId, 'assets_audio', async () => {
-      // For now, we'll mark audio as complete without actual TTS
-      // In production, integrate with ElevenLabs, PlayHT, or OpenAI TTS
-      const audioProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + STEP_WEIGHTS.assets_audio;
-      await storage.updateJob(jobId, { 
-        progressPercent: audioProgress,
-        status: 'generating_assets'
-      });
+      await storage.updateJob(jobId, { status: 'generating_assets' });
       
-      // Simulate audio generation delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (context.script && context.scenes && context.scenes.length > 0) {
+        const voice = (settings.audio?.voiceModel || 'nova') as TTSVoice;
+        const updatedScenes = [...context.scenes];
+        
+        for (let i = 0; i < updatedScenes.length; i++) {
+          const scene = updatedScenes[i];
+          const text = scene.voiceSegmentText || scene.textOverlay || '';
+          
+          if (text.trim()) {
+            try {
+              const audioBuffer = await generateSpeech(text, voice);
+              const filename = `${jobId}/scene-${i + 1}.mp3`;
+              const audioUrl = await objectStorageService.uploadBuffer(audioBuffer, 'audio/mpeg', filename);
+              updatedScenes[i].audioAssetUrl = audioUrl;
+              
+              await storage.createAsset({
+                jobId,
+                assetType: 'audio',
+                url: audioUrl,
+                metadata: { sceneIndex: i, voice }
+              });
+            } catch (err) {
+              console.error(`[Worker] Failed to generate audio for scene ${i + 1}:`, err);
+            }
+          }
+          
+          const audioProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + 
+            (STEP_WEIGHTS.assets_audio * (i + 1)) / updatedScenes.length;
+          await storage.updateJob(jobId, { 
+            progressPercent: Math.round(audioProgress),
+            scenes: updatedScenes
+          });
+        }
+        
+        context.scenes = updatedScenes;
+        await storage.updateJob(jobId, { scenes: updatedScenes });
+      }
     });
 
-    // Step 4: Render Video (ffmpeg placeholder)
+    // Step 4: Render Video (ffmpeg)
     await runStep(jobId, 'video', async () => {
       await storage.updateJob(jobId, { status: 'rendering_video' });
       
-      // In production, this would:
-      // 1. Combine images with Ken Burns effect
-      // 2. Overlay text/subtitles
-      // 3. Mix audio (voice + music)
-      // 4. Export as MP4
-      
-      // For now, we'll create a placeholder that marks the job as having a video
-      const videoProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + 
-                           STEP_WEIGHTS.assets_audio + STEP_WEIGHTS.video;
-      
-      // Estimate duration based on scenes
-      const estimatedDuration = (context.scenes?.length || 6) * 5; // 5 seconds per scene
-      
-      await storage.updateJob(jobId, { 
-        progressPercent: videoProgress,
-        durationSeconds: estimatedDuration,
-        // In production, this would be the actual video URL
-        thumbnailUrl: context.scenes?.[0]?.backgroundAssetUrl || undefined
-      });
-      
-      // Simulate rendering time
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (context.scenes && context.scenes.length > 0) {
+        try {
+          const result = await renderVideo({
+            jobId,
+            scenes: context.scenes,
+            settings
+          });
+          
+          await storage.createAsset({
+            jobId,
+            assetType: 'video',
+            url: result.videoUrl,
+            metadata: { duration: result.durationSeconds }
+          });
+          
+          await storage.createAsset({
+            jobId,
+            assetType: 'image',
+            url: result.thumbnailUrl,
+            metadata: { type: 'thumbnail' }
+          });
+          
+          const videoProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + 
+                               STEP_WEIGHTS.assets_audio + STEP_WEIGHTS.video;
+          
+          await storage.updateJob(jobId, { 
+            progressPercent: videoProgress,
+            durationSeconds: result.durationSeconds,
+            thumbnailUrl: result.thumbnailUrl,
+            videoUrl: result.videoUrl
+          });
+        } catch (err) {
+          console.error(`[Worker] Failed to render video:`, err);
+          const videoProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + 
+                               STEP_WEIGHTS.assets_audio + STEP_WEIGHTS.video;
+          await storage.updateJob(jobId, { 
+            progressPercent: videoProgress,
+            durationSeconds: (context.scenes?.length || 6) * 5,
+            thumbnailUrl: context.scenes?.[0]?.backgroundAssetUrl || undefined
+          });
+        }
+      }
     });
 
     // Step 5: Generate Caption & Hashtags

@@ -102,7 +102,8 @@ export const sceneSchema = z.object({
   textOverlay: z.string().optional(),
   voiceSegmentText: z.string().optional(),
   backgroundPrompt: z.string().optional(),
-  backgroundAssetUrl: z.string().optional()
+  backgroundAssetUrl: z.string().optional(),
+  audioAssetUrl: z.string().optional()
 });
 
 export type Scene = z.infer<typeof sceneSchema>;
