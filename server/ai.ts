@@ -238,26 +238,81 @@ function buildSystemPrompt(contentType: ContentType): string {
       - Use first-person perspective
       - Build suspense and emotional engagement
       - Include dialogue where appropriate`,
+    aita_story: `${basePrompt}
+      For AITA stories:
+      - Present a moral dilemma situation
+      - Include multiple perspectives
+      - Build tension and ask for viewer judgment`,
+    two_sentence_horror: `${basePrompt}
+      For Two-Sentence Horror:
+      - Build dread in the first sentence
+      - Deliver a shocking twist in the second
+      - Keep the terror visceral and unexpected`,
+    short_story_generic: `${basePrompt}
+      For Short Stories:
+      - Create compelling characters quickly
+      - Build a clear narrative arc
+      - End with impact or a twist`,
     would_you_rather: `${basePrompt}
       For Would You Rather:
       - Present 2 difficult choices
       - Build anticipation before revealing options
       - Ask viewers to comment their choice`,
+    this_or_that: `${basePrompt}
+      For This or That:
+      - Present clear binary choices
+      - Make options equally appealing or challenging
+      - Encourage viewer engagement`,
     quiz_trivia: `${basePrompt}
       For Quiz/Trivia:
       - Present questions clearly
       - Give viewers time to think
       - Reveal answer with interesting context`,
+    riddles: `${basePrompt}
+      For Riddles:
+      - Present the riddle with dramatic flair
+      - Give viewers time to think
+      - Reveal the answer with explanation`,
+    guessing_game: `${basePrompt}
+      For Guessing Games:
+      - Build suspense with clues
+      - Encourage viewer participation
+      - Reveal the answer satisfyingly`,
     facts: `${basePrompt}
       For Facts content:
       - Lead with the most surprising fact
       - Keep each fact punchy and memorable
       - Connect facts with smooth transitions`,
+    top_list: `${basePrompt}
+      For Top Lists:
+      - Build anticipation through ranking
+      - Save the best for last
+      - Make each item memorable`,
     motivation: `${basePrompt}
       For Motivational content:
       - Open with a powerful statement
       - Build emotional momentum
       - End with an empowering call-to-action`,
+    affirmations: `${basePrompt}
+      For Affirmations:
+      - Use positive, present-tense language
+      - Make each affirmation personal
+      - Build confidence and self-love`,
+    language_mini_lesson: `${basePrompt}
+      For Language Lessons:
+      - Introduce one word or phrase clearly
+      - Provide pronunciation guidance
+      - Give memorable usage examples`,
+    mini_history: `${basePrompt}
+      For Mini History:
+      - Start with a surprising hook
+      - Tell the story dramatically
+      - Connect history to present day`,
+    science_mini_fact: `${basePrompt}
+      For Science Facts:
+      - Make complex concepts accessible
+      - Use vivid comparisons
+      - End with a mind-blowing implication`,
   };
 
   return typeSpecificPrompts[contentType] || basePrompt;
@@ -273,13 +328,19 @@ function buildUserPrompt(contentType: ContentType, config: Record<string, any>):
     reddit_story: `Create a Reddit-style story about: "${prompt || 'an interesting personal experience'}"`,
     aita_story: `Create an AITA (Am I The A**hole) story about: "${prompt || 'a moral dilemma situation'}"`,
     two_sentence_horror: `Create a two-sentence horror story about: "${prompt || 'something terrifying'}"`,
+    short_story_generic: `Create a short fictional story about: "${prompt || 'an unexpected adventure'}"`,
     would_you_rather: `Create ${count} Would You Rather questions about: "${topic || 'interesting dilemmas'}"`,
     this_or_that: `Create ${count} This or That choices about: "${topic || 'popular comparisons'}"`,
     quiz_trivia: `Create ${count} trivia questions about: "${topic || 'interesting facts'}"`,
+    riddles: `Create ${count} clever riddles about: "${topic || 'everyday objects and concepts'}"`,
+    guessing_game: `Create a guessing game with ${count} clues about: "${topic || 'a famous person or thing'}"`,
     facts: `Create ${count} fascinating facts about: "${topic || 'interesting topics'}"`,
     top_list: `Create a Top ${count} list about: "${topic || 'interesting things'}"`,
     motivation: `Create a motivational piece about: "${prompt || 'success and perseverance'}"`,
     affirmations: `Create ${count} positive affirmations about: "${topic || 'self-love and confidence'}"`,
+    language_mini_lesson: `Create a mini language lesson teaching ${count} words/phrases in "${topic || 'Spanish'}"`,
+    mini_history: `Create a mini history lesson about: "${topic || 'an interesting historical event'}"`,
+    science_mini_fact: `Create ${count} mind-blowing science facts about: "${topic || 'the universe'}"`,
   };
 
   return typeSpecificPrompts[contentType] || 
