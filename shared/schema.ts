@@ -26,6 +26,12 @@ export const contentTypes = [
 
 export type ContentType = typeof contentTypes[number];
 
+// Content types that require premium AI models (narrative/creative content)
+export const premiumContentTypes: ContentType[] = [
+  'reddit_story', 'aita_story', 'two_sentence_horror', 'short_story_generic',
+  'motivation', 'mini_history'
+];
+
 // Job Status
 export const jobStatuses = [
   'queued',

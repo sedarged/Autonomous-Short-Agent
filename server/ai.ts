@@ -5,10 +5,18 @@ import OpenAI from "openai";
 import pLimit from "p-limit";
 import pRetry, { AbortError } from "p-retry";
 import type { ContentType, JobSettings, Scene } from "@shared/schema";
-import { contentTypeInfo } from "@shared/schema";
+import { contentTypeInfo, premiumContentTypes } from "@shared/schema";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const DEFAULT_MODEL = "gpt-5";
+// Tiered model strategy for cost optimization
+// Premium model for creative content that requires high quality
+const PREMIUM_MODEL = "gpt-5";
+// Economy model for simple, structured tasks (prompts, captions)
+const ECONOMY_MODEL = "gpt-4o-mini";
+
+// Get appropriate model based on task complexity and content type
+function getModelForScript(contentType: ContentType): string {
+  return premiumContentTypes.includes(contentType) ? PREMIUM_MODEL : ECONOMY_MODEL;
+}
 
 // This is using Replit's AI Integrations service
 const openai = new OpenAI({
@@ -45,7 +53,7 @@ export async function generateScript(
     async () => {
       try {
         const result = await openai.chat.completions.create({
-          model: DEFAULT_MODEL,
+          model: getModelForScript(contentType),
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
@@ -88,7 +96,7 @@ export async function generateImagePrompt(
     async () => {
       try {
         const result = await openai.chat.completions.create({
-          model: DEFAULT_MODEL,
+          model: ECONOMY_MODEL,
           messages: [
             { 
               role: "system", 
@@ -183,7 +191,7 @@ export async function generateCaptionAndHashtags(
     async () => {
       try {
         const result = await openai.chat.completions.create({
-          model: DEFAULT_MODEL,
+          model: ECONOMY_MODEL,
           messages: [
             { 
               role: "system", 

@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { enqueueJob } from "./videoWorker";
 import { objectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
-import { insertJobSchema, insertPresetSchema, jobSettingsSchema } from "@shared/schema";
+import { insertJobSchema, insertPresetSchema, jobSettingsSchema, premiumContentTypes } from "@shared/schema";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 
@@ -345,16 +345,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         
         const hasCompletedScript = job.steps?.some(s => s.stepType === 'script' && s.status === 'completed');
         if (hasCompletedScript && job.scriptText) {
-          cost += 0.005;
+          const isPremium = premiumContentTypes.includes(job.contentType as any);
+          cost += isPremium ? 0.005 : 0.0005;
         }
         
         const scenes = Array.isArray(job.scenes) ? job.scenes : [];
-        const scenesWithAudio = scenes.filter((s: any) => s.audioAssetUrl).length;
         const scriptCharCount = job.scriptText?.length || 0;
         cost += (scriptCharCount / 1000) * 0.015;
         
         const scenesWithImages = scenes.filter((s: any) => s.backgroundAssetUrl).length;
         cost += scenesWithImages * 0.02;
+        
+        cost += 0.0002;
         
         return cost;
       };
