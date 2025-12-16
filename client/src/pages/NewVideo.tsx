@@ -43,8 +43,10 @@ import {
   Save,
   Check,
   Lightbulb,
-  Loader2
+  Loader2,
+  TrendingUp
 } from "lucide-react";
+import { Link } from "wouter";
 import { ContentTypeIcon } from "@/components/ContentTypeIcon";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -397,8 +399,16 @@ export default function NewVideo() {
                           data-testid="input-content-prompt"
                         />
                       </FormControl>
-                      <FormDescription>
-                        The AI will use this to generate the script and structure
+                      <FormDescription className="flex items-center justify-between gap-2 flex-wrap">
+                        <span>The AI will use this to generate the script and structure</span>
+                        <Link 
+                          href="/research"
+                          className="text-xs text-primary flex items-center gap-1 hover:underline"
+                          data-testid="link-research"
+                        >
+                          <TrendingUp className="h-3 w-3" />
+                          Deep Trend Research
+                        </Link>
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
