@@ -1,0 +1,110 @@
+# MASTER DIRECTIVE v6 — Audit + Finish Repo (Autonomous-Short-Agent)
+
+You are Replit Agent (General Agent allowed). This repo is the source of truth. Your job is to audit, fix, and finish it so it runs end-to-end on Replit and produces real playable Shorts with full progress/ETA visibility.
+
+REPO FACTS (do not fight these):
+- `.replit` already configures nodejs-20 + postgresql-16 + ffmpeg via nix and enables Replit integrations.
+- Frontend: `client/` React+Vite+TS, routing via Wouter, polling via TanStack React Query, UI via shadcn/Tailwind.
+- Backend: `server/` Express+TS.
+- DB schema: `shared/schema.ts` (jobs include progressPercent + etaSeconds).
+- Worker: `server/videoWorker.ts`
+- Renderer: `server/videoRenderer.ts`
+- Design rules: `design_guidelines.md`
+- Project memory: `replit.md`
+
+## 0) FIRST ACTION — Context/memory anchors (no exceptions)
+Before changing code, create/ensure these files exist and are correct:
+
+1) Update `replit.md`:
+   - Add “Design Freeze: follow design_guidelines.md; no redesign unless broken.”
+   - Add “Definition of Done” (see section 6).
+   - Add “No Stock Footage” rule: all visuals must be AI-generated, no Pexels/Pixabay/etc.
+
+2) Create `.replit_agent_rules.md` with these rules:
+   - Style Freeze: do not change UI/CSS unless required for missing/broken features.
+   - Batch Work: implement in complete increments; don’t ask approval per file.
+   - Truth over confidence: inspect files + run commands; no guessing.
+   - Self-repair: attempt fixes up to 3 times before asking me.
+   - Verification required: cannot say “done” unless verify passes + a real job produces MP4.
+
+At the start of each major step, re-read:
+- `replit.md`
+- `design_guidelines.md`
+- `.replit_agent_rules.md`
+
+## 1) Phase A — Deep audit deliverables (no feature work yet)
+Scan: `client/`, `server/`, `shared/`, `.replit`, scripts, package.json.
+
+Produce:
+A) `AUDIT_REPORT.md` including:
+- Architecture map (client routes, server routes, worker flow)
+- Current DB tables + how used
+- What is implemented vs missing (especially ETA updates, stepper data, job resume, cost tracking)
+- Reliability risks: restart behavior, stuck jobs, partial failures
+- Rendering risks: ffmpeg availability, temp dirs, fps consistency, subtitles behavior
+- Security risks: any URL fetching (SSRF), input validation, object storage permissions
+- Top 20 issues ranked by severity and exact file references
+
+B) `BUILD_PLAN.md`:
+- A 4-phase execution plan: Foundation → Pipeline Reliability → UX Visibility/ETA → Polish
+- For each phase: exact files to change, commands to run, verification criteria
+
+Stop after creating these two files.
+
+## 2) Phase B — Verification harness (must exist before “big fixes”)
+Implement `scripts/verify.mjs` (or `scripts/verify.ts`) that:
+- Creates TWO jobs via API:
+  1) `facts`
+  2) `would_you_rather`
+- Waits/polls until completion (or fails with timeout).
+- Asserts:
+  - job_steps exist and progress through all steps
+  - progressPercent increases over time
+  - etaSeconds is present and decreases or updates reasonably (not null forever)
+  - MP4 exists and is playable (non-zero size, correct mime)
+  - Job detail endpoint returns videoUrl + thumbnailUrl
+- Print a clear pass/fail summary and exit non-zero on failure.
+
+Add npm scripts if missing:
+- `lint`, `typecheck`, `verify`
+
+## 3) Phase C — Fix core reliability & “amnesia” issues
+Hard requirements to implement/fix (repo-aware):
+- Ensure job steps exist immediately on job creation (not only when worker starts).
+- Implement ETA:
+  - Store per-step average durations (simple rolling average in DB settings table).
+  - Update etaSeconds during execution.
+- Worker resume:
+  - On server start, find jobs in `queued/running/generating_*` and re-enqueue safely.
+  - Idempotency: don’t duplicate assets if re-running the same step.
+- Stuck job handling:
+  - If a job has no progress update for X minutes, mark failed or retry depending on step.
+- Consistent FPS default 30 (update renderer filters if needed).
+
+## 4) Phase D — UX must match design_guidelines.md
+Do not redesign. Only implement missing pieces:
+- Job detail page must show:
+  - stepper timeline + per-step status
+  - progress bar and ETA text
+  - logs/messages per step
+  - final video preview player + download button
+- Dashboard must show:
+  - jobs table with status/progress/ETA
+  - “quick create” form
+
+## 5) No stock footage rule (mandatory)
+Do not add Pexels/Pixabay/stock libs. Visuals must be AI images (default cheap path) and optional AI motion. Use:
+- AI images per scene (3–8) + Ken Burns motion via ffmpeg (already implemented in videoRenderer).
+
+## 6) Definition of Done (cannot claim completion without this)
+You may only say “DONE” when all pass:
+- `npm run dev` works
+- `npm run check` (tsc) passes
+- `npm run verify` passes
+- A real job completes and produces MP4 viewable in the UI
+- Progress + ETA + stepper update live while running
+
+START NOW:
+1) Create/update anchors (replit.md + .replit_agent_rules.md).
+2) Produce AUDIT_REPORT.md + BUILD_PLAN.md.
+3) Then implement verify script and proceed through phases until Definition of Done is met.
