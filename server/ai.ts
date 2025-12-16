@@ -67,8 +67,9 @@ export async function generateScript(
 
   const info = contentTypeInfo[contentType];
   const prompt = config.prompt || "";
+  const targetPlatform = settings?.targetPlatform;
   
-  const systemPrompt = buildSystemPrompt(contentType, { hookStrength, pacingStyle, ctaEnabled });
+  const systemPrompt = buildSystemPrompt(contentType, { hookStrength, pacingStyle, ctaEnabled }, targetPlatform);
   const userPrompt = buildUserPrompt(contentType, config, targetDuration);
 
   const response = await pRetry(
@@ -288,11 +289,35 @@ function buildSystemPrompt(
     hookStrength?: string;
     pacingStyle?: string;
     ctaEnabled?: boolean;
-  }
+  },
+  targetPlatform?: string
 ): string {
   const hookStrength = viralSettings?.hookStrength || 'strong';
   const pacingStyle = viralSettings?.pacingStyle || 'fast';
   const ctaEnabled = viralSettings?.ctaEnabled !== false;
+  
+  // Platform-specific guidance (supports multiple platforms)
+  const platforms = (targetPlatform || 'tiktok').split(',').map(p => p.trim().toLowerCase());
+  const platformGuides: string[] = [];
+  
+  if (platforms.includes('tiktok')) {
+    platformGuides.push("TikTok: Raw authenticity and trend-awareness. Rewards creativity, humor, and relatable moments.");
+  }
+  if (platforms.includes('youtube_shorts')) {
+    platformGuides.push("YouTube Shorts: Clear value proposition upfront. Viewers expect polished, educational content.");
+  }
+  if (platforms.includes('instagram_reels')) {
+    platformGuides.push("Instagram Reels: Visually striking content. Audiences respond to aesthetic appeal and lifestyle content.");
+  }
+  
+  // Default to TikTok if no platforms specified
+  if (platformGuides.length === 0) {
+    platformGuides.push("TikTok: Raw authenticity and trend-awareness. Rewards creativity, humor, and relatable moments.");
+  }
+  
+  const platformGuidance = platformGuides.length === 1 
+    ? `Optimize for ${platformGuides[0]}`
+    : `Multi-platform content. Balance these platform requirements:\n    ${platformGuides.join('\n    ')}`;
   
   // Hook guidance based on strength setting
   const hookMap: Record<string, string> = {
@@ -315,6 +340,8 @@ function buildSystemPrompt(
     : "End naturally without a direct call-to-action";
 
   const basePrompt = `You are an elite viral content scriptwriter who has studied the psychology of what makes TikTok and YouTube Shorts go viral.
+    
+    PLATFORM FOCUS: ${platformGuidance}
     
     Your content MUST be optimized for maximum engagement and watch time.
     Always structure your response as JSON with the following fields:
