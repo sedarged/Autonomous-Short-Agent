@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -137,6 +137,34 @@ export default function NewVideo() {
   const { data: presets } = useQuery<Preset[]>({
     queryKey: ["/api/presets"],
   });
+
+  // Fetch global settings for budget mode
+  interface GlobalSettings {
+    budgetMode?: boolean;
+    isMonetized?: boolean;
+    defaultScenesPerMinute?: number;
+    defaultVoice?: string;
+    defaultSubtitlesEnabled?: boolean;
+    defaultSubtitleStyle?: string;
+  }
+  
+  const { data: globalSettings } = useQuery<GlobalSettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  // Apply budget mode defaults when settings are loaded
+  useEffect(() => {
+    if (globalSettings) {
+      if (globalSettings.budgetMode) {
+        // Budget mode: optimize for lower cost
+        form.setValue("visual.scenesPerMinute", 4);
+        form.setValue("targetDurationSeconds", 45);
+      } else if (globalSettings.isMonetized) {
+        // Monetized: use standard settings
+        form.setValue("visual.scenesPerMinute", globalSettings.defaultScenesPerMinute || 6);
+      }
+    }
+  }, [globalSettings]);
 
   // Fetch trending topic suggestions
   const fetchSuggestions = async (contentType: ContentType) => {
