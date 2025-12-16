@@ -199,15 +199,21 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
     
     const silentVideoPath = path.join(tempDir, 'silent_video.mp4');
     
+    // Ken Burns zoom effect - reduced scale from 2x to 1.5x for faster processing
+    const UPSCALE_FACTOR = 1.5; // 1.5x is sufficient for smooth zoompan, 2x was overkill
     const kenBurnsFilter = scenes.map((_, i) => {
       const zoomIn = i % 2 === 0;
       const zoomStart = zoomIn ? 1.0 : 1.15;
       const zoomEnd = zoomIn ? 1.15 : 1.0;
-      return `[${i}:v]scale=${outputWidth * 2}:${outputHeight * 2},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${sceneDuration * fps}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${sceneDuration * fps}:s=${outputWidth}x${outputHeight}:fps=${fps}[v${i}]`;
+      const scaledWidth = Math.round(outputWidth * UPSCALE_FACTOR);
+      const scaledHeight = Math.round(outputHeight * UPSCALE_FACTOR);
+      return `[${i}:v]scale=${scaledWidth}:${scaledHeight},zoompan=z='${zoomStart}+(${zoomEnd}-${zoomStart})*on/${sceneDuration * fps}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${sceneDuration * fps}:s=${outputWidth}x${outputHeight}:fps=${fps}[v${i}]`;
     }).join(';');
     
     const concatInputs = scenes.map((_, i) => `[v${i}]`).join('');
     const complexFilter = `${kenBurnsFilter};${concatInputs}concat=n=${scenes.length}:v=1:a=0[outv]`;
+    
+    console.log(`[Renderer] Building silent video with ${scenes.length} scenes (${UPSCALE_FACTOR}x upscale, veryfast preset)`);
     
     const ffmpegArgs = [
       '-y',
@@ -215,9 +221,12 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       '-filter_complex', complexFilter,
       '-map', '[outv]',
       '-c:v', 'libx264',
-      '-preset', 'fast',
+      '-preset', 'veryfast', // Changed from 'fast' for 2-3x speedup
       '-crf', '23',
       '-pix_fmt', 'yuv420p',
+      '-g', '60', // GOP size for better seeking
+      '-bf', '2', // B-frames for compression
+      '-movflags', '+faststart', // Move moov atom to start for web streaming
       '-r', String(fps),
       silentVideoPath
     ];
@@ -243,6 +252,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       ]);
       
       const withAudioPath = path.join(tempDir, 'video_with_audio.mp4');
+      console.log(`[Renderer] Merging audio with video`);
       await runFFmpeg([
         '-y',
         '-i', silentVideoPath,
@@ -251,6 +261,7 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
         '-c:a', 'aac',
         '-b:a', '128k',
         '-shortest',
+        '-movflags', '+faststart', // Web streaming support
         withAudioPath
       ]);
       
@@ -265,14 +276,16 @@ export async function renderVideo(options: RenderOptions): Promise<RenderResult>
       const assContent = generateAssSubtitles(scenes, sceneDuration, subtitleSettings, outputWidth, outputHeight);
       await fs.writeFile(assPath, assContent);
       
+      console.log(`[Renderer] Burning subtitles into video`);
       await runFFmpeg([
         '-y',
         '-i', finalVideoPath,
         '-vf', `ass=${assPath}`,
         '-c:v', 'libx264',
-        '-preset', 'fast',
+        '-preset', 'veryfast', // Changed from 'fast' for faster encoding
         '-crf', '23',
         '-c:a', 'copy',
+        '-movflags', '+faststart', // Web streaming support
         withSubtitlesPath
       ]);
       

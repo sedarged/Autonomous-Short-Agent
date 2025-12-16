@@ -20,12 +20,41 @@ interface JobContext {
 
 // Step weights for progress calculation
 const STEP_WEIGHTS = {
-  script: 15,
-  assets_visual: 35,
-  assets_audio: 20,
-  video: 25,
+  script: 10,
+  assets_visual: 30,
+  assets_audio: 15,
+  video: 40,
   caption: 5
 };
+
+// Estimate processing times per step (seconds) for ETA calculation
+const STEP_TIME_ESTIMATES = {
+  script: 10,           // Script generation is fast
+  assets_visual: 45,    // ~45s per image generation  
+  assets_audio: 5,      // Audio is quick per scene
+  video: 90,            // Video rendering per scene (varies with complexity)
+  caption: 5            // Caption is fast
+};
+
+// Format seconds to human readable string
+function formatETA(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+// Calculate ETA based on current progress and elapsed time
+function calculateETA(startTime: number, progressPercent: number): number | null {
+  if (progressPercent <= 0) return null;
+  const elapsed = (Date.now() - startTime) / 1000;
+  // Guard against division by zero for very small elapsed times
+  if (elapsed < 0.1) return null;
+  const rate = progressPercent / elapsed; // percent per second
+  if (rate <= 0) return null;
+  const remaining = 100 - progressPercent;
+  return Math.round(remaining / rate);
+}
 
 // Initialize all job steps (exported for routes to use)
 export async function initializeJobSteps(jobId: string): Promise<void> {
@@ -60,7 +89,9 @@ function generateHash(input: string): string {
 
 // Process a queued job through the pipeline
 export async function processJob(jobId: string): Promise<void> {
+  console.log(`[Worker] ========================================`);
   console.log(`[Worker] Starting job ${jobId}`);
+  console.log(`[Worker] ========================================`);
   
   // Try to acquire lock
   const lockAcquired = await storage.acquireJobLock(jobId, WORKER_ID, LEASE_SECONDS);
@@ -78,6 +109,8 @@ export async function processJob(jobId: string): Promise<void> {
     }
   }, LEASE_RENEW_INTERVAL);
   
+  const jobStartTime = Date.now();
+  
   try {
     const job = await storage.getJob(jobId);
     if (!job) {
@@ -87,24 +120,39 @@ export async function processJob(jobId: string): Promise<void> {
 
     const settings = job.settings as JobSettings;
     const context: JobContext = { job, settings };
+    
+    // Calculate initial ETA estimate based on content complexity
+    const estimatedScenes = settings.visual?.scenesPerMinute || 6;
+    const initialETA = STEP_TIME_ESTIMATES.script + 
+      (estimatedScenes * STEP_TIME_ESTIMATES.assets_visual) +
+      (estimatedScenes * STEP_TIME_ESTIMATES.assets_audio) +
+      (estimatedScenes * STEP_TIME_ESTIMATES.video / 5) + // Video is per total, not per scene
+      STEP_TIME_ESTIMATES.caption;
+    
+    console.log(`[Worker] Initial ETA estimate: ${formatETA(initialETA)}`);
 
     // Update job status to running
-    await storage.updateJob(jobId, { status: 'running', progressPercent: 0 });
+    await storage.updateJob(jobId, { status: 'running', progressPercent: 0, etaSeconds: initialETA });
     await storage.updateLastProgress(jobId);
 
     // Step 1: Generate Script
     if (await isCancelled(jobId)) throw new Error('Cancelled by user');
     
+    console.log(`[Worker] [Step 1/5] Generating script...`);
     await runStep(jobId, 'script', async () => {
       const result = await generateScript(settings.contentType as ContentType, settings.contentConfig || {});
       context.script = result.script;
       context.scenes = result.scenes;
       
+      console.log(`[Worker] Script generated: ${result.scenes?.length || 0} scenes created`);
+      
+      const eta = calculateETA(jobStartTime, STEP_WEIGHTS.script);
       await storage.updateJob(jobId, { 
         status: 'generating_script',
         scriptText: result.script,
         scenes: result.scenes,
-        progressPercent: STEP_WEIGHTS.script
+        progressPercent: STEP_WEIGHTS.script,
+        etaSeconds: eta
       });
       await storage.updateLastProgress(jobId);
     });
@@ -112,6 +160,7 @@ export async function processJob(jobId: string): Promise<void> {
     // Step 2: Generate Visual Assets (with idempotency)
     if (await isCancelled(jobId)) throw new Error('Cancelled by user');
     
+    console.log(`[Worker] [Step 2/5] Generating visual assets...`);
     await runStep(jobId, 'assets_visual', async () => {
       await storage.updateJob(jobId, { status: 'generating_assets' });
       
@@ -123,6 +172,8 @@ export async function processJob(jobId: string): Promise<void> {
       
       if (context.scenes && context.scenes.length > 0) {
         const updatedScenes = [...context.scenes];
+        const totalScenes = updatedScenes.length;
+        console.log(`[Worker] Processing ${totalScenes} scene images...`);
         
         for (let i = 0; i < updatedScenes.length; i++) {
           if (await isCancelled(jobId)) throw new Error('Cancelled by user');
@@ -131,9 +182,11 @@ export async function processJob(jobId: string): Promise<void> {
           
           // Skip if already has image (idempotency)
           if (scene.backgroundAssetUrl) {
-            console.log(`[Worker] Scene ${i} already has image, skipping`);
+            console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Already has image (cached)`);
             continue;
           }
+          
+          console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Generating image...`);
           
           // Generate image prompt
           const imagePrompt = await generateImagePrompt(
@@ -150,7 +203,7 @@ export async function processJob(jobId: string): Promise<void> {
           // Check if asset already exists
           const existingAsset = await storage.getAssetByPath(jobId, `/objects/generated/${filename}`);
           if (existingAsset) {
-            console.log(`[Worker] Image already exists for scene ${i}, using cached`);
+            console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Using cached image`);
             updatedScenes[i].backgroundAssetUrl = existingAsset.url;
           } else {
             // Generate image
@@ -158,6 +211,7 @@ export async function processJob(jobId: string): Promise<void> {
               const imageBuffer = await generateImage(imagePrompt);
               const imageUrl = await objectStorageService.uploadBuffer(imageBuffer, 'image/png', filename);
               updatedScenes[i].backgroundAssetUrl = imageUrl;
+              console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Image generated successfully`);
               
               // Save asset reference
               await storage.createAsset({
@@ -167,21 +221,24 @@ export async function processJob(jobId: string): Promise<void> {
                 metadata: { sceneIndex: i, prompt: imagePrompt, hash: promptHash }
               });
             } catch (err) {
-              console.error(`[Worker] Failed to generate image for scene ${i + 1}:`, err);
+              console.error(`[Worker]   Scene ${i + 1}/${totalScenes}: FAILED to generate image:`, err);
               updatedScenes[i].backgroundAssetUrl = '';
             }
           }
 
-          // Update progress
+          // Update progress with ETA
           const visualProgress = STEP_WEIGHTS.script + 
             (STEP_WEIGHTS.assets_visual * (i + 1)) / updatedScenes.length;
+          const eta = calculateETA(jobStartTime, visualProgress);
           await storage.updateJob(jobId, { 
             progressPercent: Math.round(visualProgress),
-            scenes: updatedScenes
+            scenes: updatedScenes,
+            etaSeconds: eta
           });
           await storage.updateLastProgress(jobId);
         }
         
+        console.log(`[Worker] Visual assets complete: ${totalScenes} images processed`);
         context.scenes = updatedScenes;
         await storage.updateJob(jobId, { scenes: updatedScenes });
       }
@@ -190,6 +247,7 @@ export async function processJob(jobId: string): Promise<void> {
     // Step 3: Generate Audio Assets (with idempotency)
     if (await isCancelled(jobId)) throw new Error('Cancelled by user');
     
+    console.log(`[Worker] [Step 3/5] Generating audio assets...`);
     await runStep(jobId, 'assets_audio', async () => {
       await storage.updateJob(jobId, { status: 'generating_assets' });
       
@@ -202,6 +260,8 @@ export async function processJob(jobId: string): Promise<void> {
       if (context.script && context.scenes && context.scenes.length > 0) {
         const voice = (settings.audio?.voiceModel || 'nova') as TTSVoice;
         const updatedScenes = [...context.scenes];
+        const totalScenes = updatedScenes.length;
+        console.log(`[Worker] Processing ${totalScenes} scene voiceovers (voice: ${voice})...`);
         
         for (let i = 0; i < updatedScenes.length; i++) {
           if (await isCancelled(jobId)) throw new Error('Cancelled by user');
@@ -211,11 +271,13 @@ export async function processJob(jobId: string): Promise<void> {
           
           // Skip if already has audio (idempotency)
           if (scene.audioAssetUrl) {
-            console.log(`[Worker] Scene ${i} already has audio, skipping`);
+            console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Already has audio (cached)`);
             continue;
           }
           
           if (text.trim()) {
+            console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Generating voiceover...`);
+            
             // Generate hash-based filename
             const textHash = generateHash(text + voice + jobId);
             const filename = `${jobId}/audio/voice_${i}_${textHash}.mp3`;
@@ -223,13 +285,14 @@ export async function processJob(jobId: string): Promise<void> {
             // Check if asset already exists
             const existingAsset = await storage.getAssetByPath(jobId, `/objects/generated/${filename}`);
             if (existingAsset) {
-              console.log(`[Worker] Audio already exists for scene ${i}, using cached`);
+              console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Using cached audio`);
               updatedScenes[i].audioAssetUrl = existingAsset.url;
             } else {
               try {
                 const audioBuffer = await generateSpeech(text, voice);
                 const audioUrl = await objectStorageService.uploadBuffer(audioBuffer, 'audio/mpeg', filename);
                 updatedScenes[i].audioAssetUrl = audioUrl;
+                console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: Audio generated successfully`);
                 
                 await storage.createAsset({
                   jobId,
@@ -238,20 +301,25 @@ export async function processJob(jobId: string): Promise<void> {
                   metadata: { sceneIndex: i, voice, hash: textHash }
                 });
               } catch (err) {
-                console.error(`[Worker] Failed to generate audio for scene ${i + 1}:`, err);
+                console.error(`[Worker]   Scene ${i + 1}/${totalScenes}: FAILED to generate audio:`, err);
               }
             }
+          } else {
+            console.log(`[Worker]   Scene ${i + 1}/${totalScenes}: No text, skipping audio`);
           }
           
           const audioProgress = STEP_WEIGHTS.script + STEP_WEIGHTS.assets_visual + 
             (STEP_WEIGHTS.assets_audio * (i + 1)) / updatedScenes.length;
+          const eta = calculateETA(jobStartTime, audioProgress);
           await storage.updateJob(jobId, { 
             progressPercent: Math.round(audioProgress),
-            scenes: updatedScenes
+            scenes: updatedScenes,
+            etaSeconds: eta
           });
           await storage.updateLastProgress(jobId);
         }
         
+        console.log(`[Worker] Audio assets complete: ${totalScenes} voiceovers processed`);
         context.scenes = updatedScenes;
         await storage.updateJob(jobId, { scenes: updatedScenes });
       }
@@ -260,6 +328,7 @@ export async function processJob(jobId: string): Promise<void> {
     // Step 4: Render Video
     if (await isCancelled(jobId)) throw new Error('Cancelled by user');
     
+    console.log(`[Worker] [Step 4/5] Rendering video...`);
     await runStep(jobId, 'video', async () => {
       await storage.updateJob(jobId, { status: 'rendering_video' });
       
@@ -270,17 +339,26 @@ export async function processJob(jobId: string): Promise<void> {
       }
       
       if (context.scenes && context.scenes.length > 0) {
+        console.log(`[Worker] Composing video from ${context.scenes.length} scenes...`);
+        console.log(`[Worker] This step may take several minutes depending on video length.`);
+        
+        const renderStartTime = Date.now();
         const result = await renderVideo({
           jobId,
           scenes: context.scenes,
           settings
         });
         
+        const renderDuration = (Date.now() - renderStartTime) / 1000;
+        console.log(`[Worker] Video rendering completed in ${formatETA(renderDuration)}`);
+        
         // Verify MP4 integrity before proceeding
         const integrity = result.integrityCheck;
         if (!integrity.valid) {
+          console.error(`[Worker] Video integrity check FAILED: ${integrity.error}`);
           throw new Error(`Video integrity check failed: ${integrity.error}`);
         }
+        console.log(`[Worker] Video integrity verified: ${result.durationSeconds}s, ${integrity.width}x${integrity.height}`);
         
         await storage.createAsset({
           jobId,
@@ -303,7 +381,8 @@ export async function processJob(jobId: string): Promise<void> {
           progressPercent: videoProgress,
           durationSeconds: result.durationSeconds,
           thumbnailUrl: result.thumbnailUrl,
-          videoUrl: result.videoUrl
+          videoUrl: result.videoUrl,
+          etaSeconds: 10 // Almost done after video rendering
         });
         await storage.updateLastProgress(jobId);
       }
@@ -312,6 +391,7 @@ export async function processJob(jobId: string): Promise<void> {
     // Step 5: Generate Caption & Hashtags
     if (await isCancelled(jobId)) throw new Error('Cancelled by user');
     
+    console.log(`[Worker] [Step 5/5] Generating caption and hashtags...`);
     await runStep(jobId, 'caption', async () => {
       await storage.updateJob(jobId, { status: 'generating_caption' });
       
@@ -325,14 +405,25 @@ export async function processJob(jobId: string): Promise<void> {
           script
         );
         
+        console.log(`[Worker] Caption generated: "${caption.slice(0, 50)}..."`);
+        console.log(`[Worker] Hashtags: ${hashtags.map(h => `#${h}`).join(' ')}`);
+        
         await storage.updateJob(jobId, { 
           caption,
           hashtags,
-          progressPercent: 100
+          progressPercent: 100,
+          etaSeconds: 0
         });
         await storage.updateLastProgress(jobId);
       }
     });
+    
+    // Calculate total job duration
+    const totalJobDuration = (Date.now() - jobStartTime) / 1000;
+    console.log(`[Worker] ========================================`);
+    console.log(`[Worker] Job ${jobId} completed successfully!`);
+    console.log(`[Worker] Total processing time: ${formatETA(totalJobDuration)}`);
+    console.log(`[Worker] ========================================`);
 
     // Mark job as completed
     await storage.updateJob(jobId, { 
