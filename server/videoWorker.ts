@@ -496,10 +496,9 @@ export async function processJob(jobId: string): Promise<void> {
     console.error(`[Worker] Job ${jobId} failed:`, error);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    const status = errorMessage.includes('Cancelled') ? 'failed' : 'failed';
     
     await storage.updateJob(jobId, { 
-      status,
+      status: 'failed',
       errorMessage
     });
   } finally {
