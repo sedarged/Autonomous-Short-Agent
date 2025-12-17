@@ -564,9 +564,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const scriptCharCount = job.scriptText?.length || 0;
         cost += (scriptCharCount / 1000) * 0.015;
         
-        // Type-safe scene filtering
-        const scenesWithImages = scenes.filter((s): s is { backgroundAssetUrl: string } & Record<string, any> => 
-          typeof s === 'object' && s !== null && 'backgroundAssetUrl' in s && !!s.backgroundAssetUrl
+        // Type-safe scene filtering - scenes are stored as JSONB
+        interface SceneWithAsset {
+          backgroundAssetUrl?: string | null;
+          [key: string]: unknown;
+        }
+        const scenesWithImages = scenes.filter((s): s is SceneWithAsset => 
+          typeof s === 'object' && s !== null && 'backgroundAssetUrl' in s && 
+          typeof (s as SceneWithAsset).backgroundAssetUrl === 'string' && 
+          !!(s as SceneWithAsset).backgroundAssetUrl
         ).length;
         cost += scenesWithImages * 0.02;
         
