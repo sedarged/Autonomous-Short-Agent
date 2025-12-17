@@ -152,20 +152,6 @@ export default function NewVideo() {
     queryKey: ["/api/settings"],
   });
 
-  // Apply budget mode defaults when settings are loaded
-  useEffect(() => {
-    if (globalSettings) {
-      if (globalSettings.budgetMode) {
-        // Budget mode: optimize for lower cost
-        form.setValue("visual.scenesPerMinute", 4);
-        form.setValue("targetDurationSeconds", 45);
-      } else if (globalSettings.isMonetized) {
-        // Monetized: use standard settings
-        form.setValue("visual.scenesPerMinute", globalSettings.defaultScenesPerMinute || 6);
-      }
-    }
-  }, [globalSettings]);
-
   // Fetch trending topic suggestions
   const fetchSuggestions = async (contentType: ContentType) => {
     setSuggestionLoading(true);
@@ -186,6 +172,20 @@ export default function NewVideo() {
     resolver: zodResolver(formSchema),
     defaultValues,
   });
+
+  // Apply budget mode defaults when settings are loaded
+  useEffect(() => {
+    if (!globalSettings) return;
+    
+    if (globalSettings.budgetMode) {
+      // Budget mode: optimize for lower cost
+      form.setValue("visual.scenesPerMinute", 4);
+      form.setValue("targetDurationSeconds", 45);
+    } else if (globalSettings.isMonetized) {
+      // Monetized: use standard settings
+      form.setValue("visual.scenesPerMinute", globalSettings.defaultScenesPerMinute || 6);
+    }
+  }, [globalSettings, form.setValue]);
 
   const contentType = form.watch("contentType");
   const filteredPresets = presets?.filter(p => p.contentType === contentType) || [];
